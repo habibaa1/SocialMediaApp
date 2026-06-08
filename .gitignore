@@ -1,0 +1,7 @@
+./config/.env.development
+./config/.env.production
+node_modules/
+.env
+.env.development
+.env.production
+*.json
