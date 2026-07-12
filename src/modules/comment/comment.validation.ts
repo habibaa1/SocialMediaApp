@@ -1,41 +1,53 @@
-import { z } from 'zod';
-import { generalValidationFields } from '../../common/validation';
-import { fileFieldValidation } from '../../common/utils/multer';
+import { z } from "zod";
+import { generalValidationFields } from "../../common/validation";
 
-export const createComment = {
-        params: z.strictObject({
-        postId: generalValidationFields.id
-    }),
-    body: z.strictObject({
-        content: z.string().optional(),
-        files: z.array(generalValidationFields.file(fileFieldValidation.image)).optional(),
-        tags: z.array(generalValidationFields.id).optional(),
-    }).superRefine((args, ctx) => {
-        if (!args.files?.length && !args.content) {
-            ctx.addIssue({
-                code: "custom",
-                path: ['content'],
-                message: "Content is required"
-            })
-        }
-        if (args.tags?.length) {
+export const createCommentSchema = {
+  body: z.strictObject({
+    postId: generalValidationFields.id,
+    content: z
+      .string()
+      .min(1, { message: "Comment content is required" })
+      .max(1000),
+    attachments: z.array(z.string()).optional(),
+  }),
+};
 
-    const uniqueTags = [...new Set(args.tags)]
-            if (uniqueTags.length !== args.tags.length) {
-                ctx.addIssue({
-                    code: "custom",
-                    path: ['tags'],
-                    message: "Duplicated tag"
-                })
-            }
-        }
+export const updateCommentSchema = {
+  params: z.strictObject({ id: generalValidationFields.id }),
+  body: z
+    .strictObject({
+      content: z.string().min(1).max(1000).optional(),
+      attachments: z.array(z.string()).optional(),
     })
-}
-
-export const replyOnComment = {
-        params: z.strictObject({
-        postId: generalValidationFields.id,
-        commentId: generalValidationFields.id
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "Please provide content or attachments to update",
     }),
-    body: createComment.body
-}
+};
+
+export const getCommentSchema = {
+  params: z.strictObject({ id: generalValidationFields.id }),
+};
+
+export const listPostCommentsSchema = {
+  params: z.strictObject({ postId: generalValidationFields.id }),
+};
+
+export const reactCommentSchema = {
+  params: z.strictObject({ id: generalValidationFields.id }),
+  body: z.strictObject({
+    emoji: z.string().min(1).max(4),
+  }),
+};
+
+export const deleteCommentSchema = getCommentSchema;
+
+export const replyCommentSchema = {
+  params: z.strictObject({ id: generalValidationFields.id }),
+  body: z.strictObject({
+    content: z
+      .string()
+      .min(1, { message: "Reply content is required" })
+      .max(1000),
+    attachments: z.array(z.string()).optional(),
+  }),
+};

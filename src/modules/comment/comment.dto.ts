@@ -1,10 +1,18 @@
-import { z } from 'zod';
-import { createComment, replyOnComment } from './comment.validation';
+import { z } from "zod";
+import {
+  createCommentSchema,
+  deleteCommentSchema,
+  getCommentSchema,
+  listPostCommentsSchema,
+  reactCommentSchema,
+  replyCommentSchema,
+  updateCommentSchema,
+} from "./comment.validation";
 
-export type createCommentBodyDto = z.infer<typeof createComment.body>;
-export type createCommentParamsDto = z.infer<typeof createComment.params>;
-export type createReplyOnCommentParamsDto = z.infer<typeof replyOnComment.params>;
-
-
-
-
+export type CreateCommentDto = z.infer<typeof createCommentSchema.body>;
+export type UpdateCommentDto = z.infer<typeof updateCommentSchema.body>;
+export type CommentIdDto = z.infer<typeof getCommentSchema.params>;
+export type ListPostCommentsDto = z.infer<typeof listPostCommentsSchema.params>;
+export type ReactCommentDto = z.infer<typeof reactCommentSchema.body>;
+export type DeleteCommentDto = z.infer<typeof deleteCommentSchema.params>;
+export type ReplyCommentDto = z.infer<typeof replyCommentSchema.body>;

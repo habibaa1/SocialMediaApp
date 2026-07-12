@@ -1,54 +1,189 @@
-import {Router} from "express";
-import { authentication,validation} from "../middleware";
+import { NextFunction, Request, Response, Router } from "express";
+import { authentication, validation } from "../../middleware";
 import { successResponse } from "../../common/response";
-import { Request, Response, NextFunction } from "express";
-import {cloudFileUplad , fileFieldValidation } from "../../common/utils/multer";
-import * as validators from "./post.validation"
-import { postService } from "./post.service";
-import { PaginateDto, paginationValidationSchema } from "../../common/validation";
-import {reactPostParamsDto, reactPostQueryDto, UpdatePostBodyDto, UpdatePostParamsDto} from "./post.dto"
-import { CommentRouter } from "../comment";
+import postService from "./post.service";
+import * as validators from "./post.validation";
+
 const router = Router();
-router.use("/:postId/comment", CommentRouter);
-router.get(
-    "/",
-    authentication(),
-    validation(paginationValidationSchema),
-    async (req: Request, res: Response, next: NextFunction): Promise<Response> => {
-        const data = await postService.postList(req.query as PaginateDto ,req.user);
-        return successResponse({ res, status: 200, data });
-    }
-);
+
 router.post(
-    "/",
-    authentication(),
-    cloudFileUplad({ validation: fileFieldValidation.image }).array("attachments", 2),
-    validation(validators.createPost),
-    async (req: Request, res: Response, next: NextFunction): Promise<Response> => {
-        const data = await postService.createPost({...req.body, files: req.files}, req.user) 
-        return successResponse({ res, status: 201 , data })
+  "/",
+  authentication(),
+  validation(validators.createPostSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.createPost(req.body, req.user);
+      return successResponse({
+        res,
+        status: 201,
+        message: "Post created successfully",
+        data,
+      });
+    } catch (error) {
+      return next(error);
     }
-)
+  },
+);
+
+router.get(
+  "/feed",
+  authentication(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.listFeed(req.user);
+      return successResponse({ res, data });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.get(
+  "/dashboard",
+  authentication(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.dashboard(req.user);
+      return successResponse({ res, data });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.get(
+  "/profile/:id",
+  authentication(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.listUserPostsById(String(req.params.id));
+      return successResponse({ res, data });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.get(
+  "/",
+  authentication(),
+
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.listPosts();
+      return successResponse({ res, data });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.get(
+  "/mine",
+  authentication(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.listUserPosts(req.user);
+      return successResponse({ res, data });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.get(
+  "/:id",
+  authentication(),
+  validation(validators.getPostSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.getPostById(String(req.params.id));
+      return successResponse({ res, data });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
 
 router.patch(
-    "/:postId/react",
-    authentication(),
-    validation(validators.reactPost),
-    async (req: Request, res: Response, next: NextFunction): Promise<Response> => {
-        const data = await postService.reactPost(req.params as reactPostParamsDto , req.query as unknown as reactPostQueryDto, req.user) 
-        return successResponse({ res, status: 200 , data })
+  "/:id",
+  authentication(),
+  validation(validators.updatePostSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.updatePost(
+        String(req.params.id),
+        req.body,
+        req.user,
+      );
+      return successResponse({
+        res,
+        message: "Post updated successfully",
+        data,
+      });
+    } catch (error) {
+      return next(error);
     }
-)
+  },
+);
 
-
-router.patch(
-    "/:postId",
-    authentication(),
-    cloudFileUplad({ validation: fileFieldValidation.image }).array("attachments", 2),
-    validation(validators.updatePost),
-    async (req: Request, res: Response, next: NextFunction): Promise<Response> => {
-        const data = await postService.updatePost(req.params as UpdatePostParamsDto , req.body as UpdatePostBodyDto, req.user) 
-        return successResponse({ res, status: 200 , data })
+router.delete(
+  "/:id",
+  authentication(),
+  validation(validators.deletePostSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await postService.deletePost(String(req.params.id), req.user);
+      return successResponse({
+        res,
+        message: "Post deleted successfully",
+      });
+    } catch (error) {
+      return next(error);
     }
-)
+  },
+);
+
+router.post(
+  "/:id/like",
+  authentication(),
+  validation(validators.likePostSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.Like(String(req.params.id), req.user);
+      return successResponse({
+        res,
+        message: data.likes?.length
+          ? "Post like status updated"
+          : "Like toggled",
+        data,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.post(
+  "/:id/react",
+  authentication(),
+  validation(validators.reactPostSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await postService.Reaction(
+        String(req.params.id),
+        req.body.emoji,
+        req.user,
+      );
+      return successResponse({
+        res,
+        message: "Post reaction updated",
+        data,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
 export default router;

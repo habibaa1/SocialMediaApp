@@ -1,10 +1,17 @@
-import { z } from 'zod';
-import { createPost, reactPost, updatePost } from './post.validation';
+import { z } from "zod";
+import {
+  createPostSchema,
+  deletePostSchema,
+  getPostSchema,
+  likePostSchema,
+  reactOnPostGQL,
+  updatePostSchema,
+} from "./post.validation";
 
-export type createPostBodyDto = z.infer<typeof createPost.body>;
-export type reactPostQueryDto = z.infer<typeof reactPost.query>;
-export type reactPostParamsDto = z.infer<typeof reactPost.params>;
-export type UpdatePostBodyDto = z.infer<typeof updatePost.body>
-export type UpdatePostParamsDto = z.infer<typeof updatePost.params>
+export type CreatePostDto = z.infer<typeof createPostSchema.body>;
+export type UpdatePostDto = z.infer<typeof updatePostSchema.body>;
+export type PostIdDto = z.infer<typeof getPostSchema.params>;
+export type LikePostDto = z.infer<typeof likePostSchema.params>;
 
-
+export type DeletePostDto = z.infer<typeof deletePostSchema.params>;
+export type ReactOnPostArgsDto = z.infer<typeof reactOnPostGQL>;

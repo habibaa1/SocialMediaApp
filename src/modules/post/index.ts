@@ -1,1 +1,2 @@
-export {default as PostRouter} from './post.controller'
+export { default as postRouter } from "./post.controller";
+export * from "./gql";

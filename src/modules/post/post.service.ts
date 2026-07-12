@@ -1,242 +1,326 @@
-import { HydratedDocument, Types } from "mongoose";
-import { createPostBodyDto ,reactPostParamsDto , reactPostQueryDto , UpdatePostBodyDto, UpdatePostParamsDto} from "./post.dto";
-import { IPaginate, IPost, IUser } from "../../common/interfaces";
-import { NotificationService, notificationService, RedisService, redisService, S3Service } from "../../common/services";
-import { PostRepository, UserRepository } from "../../DB/repository";
-import { BadRequestExaption, NotFoundExeption } from "../../common/exception/domain.exception";
-import { randomUUID } from "crypto";
-import { getAvailability } from "../../common/utils/post";
-import { PaginateDto } from "../../common/validation/general.validation";
-import { toObjectId } from "../../common/utils/objectid";
+import { HydratedDocument, PopulateOptions, Types } from "mongoose";
+import { IPost, IUser } from "../../common/interface";
+import { AvailabilityEnum } from "../../common/Enums";
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from "../../common/exceptions";
+import {
+  CommentRepository,
+  NotificationRepository,
+  PostRepository,
+  StoryRepository,
+} from "../../DB/repository";
+import { CreatePostDto, UpdatePostDto } from "./post.dto";
+import { IAuthUser } from "../../common/types/express.types";
+import { PaginateDto } from "../../common/validation";
+import { ReactOnPostArgsDto } from "./post.dto";
+
 export class PostService {
-private readonly redis: RedisService;
-    private readonly userRepository: UserRepository;
-    private readonly postRepository: PostRepository;
-    private readonly notification: NotificationService;
-    private readonly s3: S3Service;
+  private populate: PopulateOptions[] = [
+    { path: "likes" },
+    { path: "createdBy" },
+    { path: "Tags" },
+    { path: "updatedBy" },
+    {
+      path: "comments",
+      populate: [{ path: "reply", populate: [{ path: "reply" }] }],
+    },
+  ];
 
-    constructor() {
-        this.userRepository = new UserRepository();
-        this.postRepository = new PostRepository();
-        this.redis = redisService;
-        this.notification = notificationService;
-        this.s3 = new S3Service();
-    }
-async postList({page, size, search}: PaginateDto, user: HydratedDocument<IUser> ) :Promise<IPaginate<IPost>> {
-    const posts = await this.postRepository.paginate({
-        filter: {
-            $or: getAvailability(user),
-            ...(search?.length ? { content: { $regex: search, $options: "i" } } : {})
+  private readonly postRepository: PostRepository;
+  private readonly commentRepository: CommentRepository;
+  private readonly notificationRepository: NotificationRepository;
+  private readonly storyRepository: StoryRepository;
+
+  constructor() {
+    this.postRepository = new PostRepository();
+    this.commentRepository = new CommentRepository();
+    this.notificationRepository = new NotificationRepository();
+    this.storyRepository = new StoryRepository();
+  }
+  async postList(args: PaginateDto, user: IAuthUser["user"]) {
+    const posts = await this.postRepository.find({
+      filter: { deletedAt: null },
+
+      options: {
+        lean: true,
+        populate: this.populate,
+        sort: {
+          createdAt: -1,
         },
-        page,size,
-        options: {
-            populate: [{path:"comments", populate:[{path:"reply", populate:[{path:"reply"}]}]}]
-        }
+      },
     });
 
-        return posts;
-    }
+    return {
+      docs: posts,
 
-async createPost(
-        { availability, content, files, tags }: createPostBodyDto,
-        user: HydratedDocument<IUser> 
-    ) :Promise<IPost> {
-        const mentions: Types.ObjectId[] = [];
-        const FCM_Tokens: string[] = [];
+      currentPage: 1,
 
-        if (tags?.length) {
-            const mentionedAccounts = await this.userRepository.find({
-                filter: {
-                    _id: { $in: tags }
-                }
-            });
+      pages: 1,
 
-            if (mentionedAccounts.length !== tags.length) {
-                throw new NotFoundExeption("Fail to find some or all mentioned accounts");
-            }
+      size: posts.length,
+    };
+  }
+  async createPost(
+    data: CreatePostDto,
+    user: HydratedDocument<IUser>,
+  ): Promise<IPost> {
+    const payload = {
+      ...data,
+      createdBy: user._id,
+      availability: data.availability ?? AvailabilityEnum.PUBLIC,
+      reactions: [],
+    };
 
-            for (const tag of tags) {
-                mentions.push(toObjectId(tag));
-                
-                (await this.redis.getFCMs(tag) || []).map(token => FCM_Tokens.push(token));
-            }
-        }
-        const folderId = randomUUID();
-            let attachments: string[] = []
-            if (files?.length) {
-                attachments = await this.s3.uploadAssets({
-                    files: files as Express.Multer.File[],
-                    path: `Post/${folderId}`
-                })
-            }
-            const post = await this.postRepository.createOne({
-                data: {
-                    createdBy: user._id,
-                    content: content as string,
-                    attachments,
-                    folderId,
-                    availability,
-                    tags: mentions
-                }
-            })
-        if (!post) {
-            if (attachments.length) {
-                await this.s3.deleteAssets({
-                    Keys: attachments.map(ele =>{ 
-                        return{Key:ele}
-                    })
-                });
-            }
-    throw new BadRequestExaption("Fail")
-}
+    return this.postRepository.createOne({ data: payload });
+  }
 
-        if (FCM_Tokens.length) {
-            await this.notification.sendNotifications({
-                tokens: FCM_Tokens, data: {
-                    title: "Post mention",
-                    body: JSON.stringify({
-                        message: `${user.username} mentioned you in his post`,
-                        postId: post._id
-                    })
-                }
-            })
-        }
-        return post.toJSON();
-    }
-
-async updatePost(
-        { postId }: UpdatePostParamsDto,
-        { availability, content, files=[], tags=[], removeFiles=[], removeTags=[] }: UpdatePostBodyDto,
-        user: HydratedDocument<IUser> 
-    ) :Promise<IPost> {
-        const post = await this.postRepository.findOne({
-    filter: { _id: postId, createdBy: user._id }
-})
-
-if (!post) {
-    throw new NotFoundExeption("Fail to find matching post")
-}
-
-    if (!post.content && !content && !files?.length && post.attachments?.length == removeFiles.length) {
-    throw new BadRequestExaption("We cannot leave empty post")
-}
-        const mentions: Types.ObjectId[] = [];
-        const FCM_Tokens: string[] = [];
-
-        if (tags?.length) {
-            const mentionedAccounts = await this.userRepository.find({
-                filter: {
-                    _id: { $in: tags }
-                }
-            });
-
-            if (mentionedAccounts.length !== tags.length) {
-                throw new NotFoundExeption("Fail to find some or all mentioned accounts");
-            }
-
-            for (const tag of tags) {
-                mentions.push(toObjectId(tag));
-                
-                (await this.redis.getFCMs(tag) || []).map(token => FCM_Tokens.push(token));
-            }
-        }
-        const folderId = randomUUID();
-            let attachments: string[] = []
-            if (files?.length) {
-                attachments = await this.s3.uploadAssets({
-                    files: files as Express.Multer.File[],
-                    path: `Post/${folderId}`
-                })
-            }
-            const updatedPost = await this.postRepository.findOneAndUpdate({
-                filter: { 
-                _id: postId, 
-                createdBy: user._id },
-                update: [
-                    {
-                        $set: {
-                            content: content || post.content,
-                            availability: Number(availability) || post.availability,
-                            updatedBy: user._id,
-                            attachments: {
-                                $setUnion: [
-                                    {
-                                        $setDifference: [
-                                            "$attachments",
-                                            removeFiles
-                                        ]
-                                    },
-                                    attachments
-                                ]
-                            },
-                            tags: {
-                                $setUnion: [
-                                    {
-                                        $setDifference: [
-                                            "$tags",
-                                            removeTags.map(ele => {return toObjectId(ele)})
-                                        ]
-                                    },
-                                    mentions
-                                ]
-                            }
-                        }
-                    }
-                ]
-            })
-        if (!updatedPost) {
-            if (attachments.length) {
-                await this.s3.deleteAssets({
-                    Keys: attachments.map(ele =>{ 
-                        return{Key:ele}
-                    })
-                });
-            }
-    throw new BadRequestExaption("Fail")
-}
-if (removeFiles.length) {
-    await this.s3.deleteAssets({
-        Keys: removeFiles.map(ele =>{
-            return{Key:ele}
-        })
+  async listPosts(): Promise<IPost[]> {
+    return this.postRepository.find({
+      filter: { deletedAt: null },
+      options: {
+        lean: true,
+        sort: { createdAt: -1 },
+        populate: [
+          { path: "createdBy", select: "firstName lastName profilePicture" },
+          { path: "likes", select: "firstName lastName profilePicture" },
+          { path: "tags", select: "firstName lastName profilePicture" },
+        ],
+      },
     });
-}
+  }
 
-        if (FCM_Tokens.length) {
-            await this.notification.sendNotifications({
-                tokens: FCM_Tokens, data: {
-                    title: "Post mention",
-                    body: JSON.stringify({
-                        message: `${user.username} mentioned you in his post`,
-                        postId: post._id
-                    })
-                }
-            })
-        }
-        return updatedPost.toJSON();
+  async listFeed(user: HydratedDocument<IUser>): Promise<IPost[]> {
+    return this.postRepository.find({
+      filter: { deletedAt: null },
+      options: {
+        lean: true,
+        sort: { createdAt: -1 },
+        populate: [
+          { path: "createdBy", select: "firstName lastName profilePicture" },
+          { path: "likes", select: "firstName lastName profilePicture" },
+          { path: "tags", select: "firstName lastName profilePicture" },
+        ],
+      },
+    });
+  }
+
+  async listUserPostsById(userId: string): Promise<IPost[]> {
+    return this.postRepository.find({
+      filter: { createdBy: userId, deletedAt: null },
+      options: {
+        lean: true,
+        sort: { createdAt: -1 },
+      },
+    });
+  }
+
+  async listUserPosts(user: HydratedDocument<IUser>): Promise<IPost[]> {
+    return this.postRepository.find({
+      filter: { createdBy: user._id, deletedAt: null },
+      options: {
+        lean: true,
+        sort: { createdAt: -1 },
+      },
+    });
+  }
+
+  async getPostById(id: string): Promise<IPost> {
+    const post = await this.postRepository.findById({
+      id,
+      options: {
+        populate: [
+          { path: "createdBy", select: "firstName lastName profilePicture" },
+          { path: "likes", select: "firstName lastName profilePicture" },
+          { path: "tags", select: "firstName lastName profilePicture" },
+        ],
+      },
+    });
+
+    if (!post || (post as any).deletedAt) {
+      throw new NotFoundException("Post not found");
     }
-async reactPost({ postId }: reactPostParamsDto, { react }: reactPostQueryDto, user: HydratedDocument<IUser>): Promise<IPost> {
 
-    const post = await this.postRepository.findOneAndUpdate({
-        filter: {
-            _id: postId,
-            $or: getAvailability(user),
+    return post as IPost;
+  }
+
+  async updatePost(
+    id: string,
+    data: UpdatePostDto,
+    user: HydratedDocument<IUser>,
+  ): Promise<IPost> {
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException("No data provided to update");
+    }
+
+    const post = await this.postRepository.findById({ id });
+
+    if (!post || (post as any).deletedAt) {
+      throw new NotFoundException("Post not found");
+    }
+
+    const ownerId = (post.createdBy as any).toString();
+    if (ownerId !== user._id.toString()) {
+      throw new ForbiddenException("You are not allowed to update this post");
+    }
+
+    const updated = await this.postRepository.updateOne({
+      filter: { _id: id },
+      update: {
+        ...data,
+        updatedBy: user._id,
+      },
+    });
+
+    if (!updated) {
+      throw new NotFoundException("Failed to update post");
+    }
+
+    return updated as IPost;
+  }
+
+  async deletePost(id: string, user: HydratedDocument<IUser>): Promise<IPost> {
+    const post = await this.postRepository.findById({ id });
+
+    if (!post || (post as any).deletedAt) {
+      throw new NotFoundException("Post not found");
+    }
+
+    const ownerId = (post.createdBy as any).toString();
+    if (ownerId !== user._id.toString()) {
+      throw new ForbiddenException("You are not allowed to delete this post");
+    }
+
+    const deleted = await this.postRepository.updateOne({
+      filter: { _id: id },
+      update: { deletedAt: new Date() },
+    });
+
+    if (!deleted) {
+      throw new NotFoundException("Failed to delete post");
+    }
+
+    return deleted as IPost;
+  }
+
+  async Like(id: string, user: HydratedDocument<IUser>): Promise<IPost> {
+    const post = await this.postRepository.findById({ id });
+
+    if (!post || (post as any).deletedAt) {
+      throw new NotFoundException("Post not found");
+    }
+
+    const userId = user._id.toString();
+    const likes = ((post.likes || []) as Types.ObjectId[]).map((like) =>
+      like.toString(),
+    );
+
+    const liked = likes.includes(userId);
+    const updatedLikes = liked
+      ? likes.filter((like) => like !== userId)
+      : [...likes, userId].map((value) => new Types.ObjectId(value));
+
+    const updated = await this.postRepository.updateOne({
+      filter: { _id: id },
+      update: {
+        likes: updatedLikes,
+      },
+    });
+
+    if (!updated) {
+      throw new NotFoundException("Failed to update likes");
+    }
+
+    return updated as IPost;
+  }
+
+  async Reaction(
+    id: string,
+    emoji: string,
+    user: HydratedDocument<IUser>,
+  ): Promise<IPost> {
+    const post = await this.postRepository.findById({ id });
+    if (!post || (post as any).deletedAt) {
+      throw new NotFoundException("Post not found");
+    }
+
+    const existingReactions = (post.reactions || []) as Array<{
+      emoji: string;
+      userId: Types.ObjectId;
+    }>;
+
+    const currentUserId = user._id.toString();
+    const updatedReactions = [...existingReactions];
+    const existingIndex = updatedReactions.findIndex(
+      (reaction) =>
+        reaction.emoji === emoji &&
+        reaction.userId.toString() === currentUserId,
+    );
+
+    if (existingIndex >= 0) {
+      updatedReactions.splice(existingIndex, 1);
+    } else {
+      updatedReactions.push({ emoji, userId: user._id as Types.ObjectId });
+    }
+
+    const updated = await this.postRepository.updateOne({
+      filter: { _id: id },
+      update: { reactions: updatedReactions },
+    });
+
+    if (!updated) {
+      throw new NotFoundException("Failed to update reaction");
+    }
+
+    return updated as IPost;
+  }
+
+  async dashboard(
+    user: HydratedDocument<IUser>,
+  ): Promise<Record<string, number>> {
+    const postCount = await this.postRepository.countDocuments({
+      filter: { createdBy: user._id, deletedAt: null },
+    });
+    const commentCount = await this.commentRepository.countDocuments({
+      filter: { createdBy: user._id, deletedAt: null },
+    });
+    const unreadNotifications =
+      await this.notificationRepository.countDocuments({
+        filter: { recipientId: user._id, isRead: false, deletedAt: null },
+      });
+    const activeStories = await this.storyRepository.countDocuments({
+      filter: { createdBy: user._id, deletedAt: null },
+    });
+
+    return {
+      postCount,
+      commentCount,
+      unreadNotifications,
+      activeStories,
+    };
+  }
+  reactPost = async (args: ReactOnPostArgsDto, user: IAuthUser["user"]) => {
+    const updatedPost = await this.postRepository.updateOne({
+      filter: { _id: args.postID },
+      update: {
+        $push: {
+          reactions: {
+            emoji: args.react,
+            userId: user._id,
+          },
+          populate: this.populate,
         },
-        update: {
-            ...(Number(react) > 0 ? { $addToSet: { likes: user._id } } : { $pull: { likes: user._id } })
-        }
-    })
+      },
+    });
 
-    if (!post) {
-        throw new NotFoundExeption("Fail to find matching post")
+    if (!updatedPost) {
+      throw new BadRequestException("Failed to react to post");
     }
-    return post.toJSON()
 
+    return updatedPost;
+  };
 }
 
-
-
-
-
-}
-export const postService = new PostService()
+export default new PostService();

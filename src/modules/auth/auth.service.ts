@@ -1,307 +1,367 @@
-// import { HydratedDocument } from "mongoose";
-import { BadRequestExaption , ConflictExeption, NotFoundExeption } from "../../common/exception";
-import { UserRepository } from "../../DB/repository/user.reposatory";
-import { LoginDto, SignupDto ,ConfirmEmailDto ,ResendConfirmEmailDto } from "./auth.dto"
-import { IUser } from "../../common/interfaces";
-import { compareHash, generateHash } from "../../common/utils/security";
-import { emailEvent, emailTemplate, sendEmail } from "../../common/utils/email";
-import { NotificationService, redisService, RedisService, TokenService } from "../../common/services";
+import {
+  confirmEmailDto,
+  forgotPasswordDto,
+  LoginDto,
+  ResendConfirmEmailDto,
+  resetPasswordDto,
+  SignupDto,
+} from "./auth.dto";
+import { DeleteResult, HydratedDocument } from "mongoose";
+import {
+  BadRequestExaption,
+  ConflictExeption,
+  NotFoundExeption,
+  UnauthorizedExeption,
+} from "../../common/exception";
+import { compareHash } from "../../common/utils/security/hash.security";
+
+import { UserRepository } from "../../DB/repository";
+import {
+  redisService,
+  RedisService,
+} from "../../common/services/redis.service";
 import { EmailEnum, ProviderEnum } from "../../common/enums";
-import { createRandomOtp } from "../../common/utils/otp";
-import { ILoginRessponse } from "./auth.entities";
+import { NotificationService, TokenService } from "../../common/services";
+import { IUser } from "../../common/interfaces";
+import { ILoginResponse } from "./auth.entity";
 import { OAuth2Client, TokenPayload } from "google-auth-library";
 import { CLIENT_IDS } from "../../config/config";
-import {notificationService} from "../../common/services/notfication.service"
-// import { SecurityService } from "../../common/services";
-// import { ISignupResspones } from "./auth.entities"
-// import { ApplicationExaption } from "../../common/exception"
-export class AuthnticationService {
 
-    private readonly userRepository: UserRepository
-    private readonly redis:RedisService
-    private readonly tokenService:TokenService
-    private readonly notificationService : NotificationService
+/* ================= SERVICE ================= */
 
-    // private readonly securityService: SecurityService
-    constructor() {
-            this.userRepository = new UserRepository()
-            this.tokenService= new TokenService()
-            this.redis = redisService
-            this.notificationService = notificationService
-            // this.securityService = new SecurityService()
+export class AuthenticationService {
+  private readonly userRepository: UserRepository;
+  private readonly redis: RedisService;
+  private readonly tokens: TokenService;
+  private readonly notification: NotificationService;
 
-    }
-// public login(data: any): string{
+  constructor() {
+    this.userRepository = new UserRepository();
+    this.redis = redisService;
+    this.tokens = new TokenService();
+    this.notification = new NotificationService();
+  }
 
-//     throw new ApplicationExaption("not implemented yet ", 400 ,{cause :{extra:"lol"}})
+  //     LOGIN
 
-// }
-public async login({email, password , FCM}:LoginDto,issuer:string) :Promise<ILoginRessponse> {
-    // const {email,password} = inputs;
+  public async login(
+    inputs: LoginDto,
+    issuer: string,
+  ): Promise<ILoginResponse> {
+    const { email, password, FCM } = inputs;
 
     const user = await this.userRepository.findOne({
-        filter:{
-            email,
-            provider:ProviderEnum.SYSTEM,
-            confirmEmail:{$exists:true}
-        },
-    });
-    if(!user){
-        throw new NotFoundExeption("invalid login credentials")
-    }
-    if(! await compareHash({plaintext:password,ciphertext: user.password})){
-        throw new NotFoundExeption("invaled login credentials")
-    }
-    if (FCM) {
-
-    await this.redis.addFCM(user._id, FCM)
-    const tokens = await this.redis.getFCMs(user._id);
-    if (tokens?.length){
-        await this.notificationService.sendNotifications({
-            tokens,
-            data:{
-                title: "Login Notification",
-                body: `You have logged in successfully at ${new Date()}`
-            }
-        })
-    }
-    }
-
-    return await this.tokenService.createLoginCredentials(user,issuer)
-}
-private async sendEmailOtp ({email,subject, title}:{email:string,subject:EmailEnum,title:string}) {
-        const isBlockedTTL = await this.redis.ttl (this.redis.blockOtpKey({email , subject}))
-        if (isBlockedTTL > 0){
-            throw new BadRequestExaption(`sorry we cannot request new otp while are blocked please try again after ${isBlockedTTL}`)
-        }
-        const remainingOtpTTL = await this.redis.ttl(this.redis.otpKey({email,subject}))
-                if (remainingOtpTTL > 0){
-            throw new BadRequestExaption(`sorry we cannot request new otp while are blocked please try again after ${remainingOtpTTL}`)
-        }
-        const maxtrial = await this.redis.get(this.redis.maxAttemptOtpKey({email,subject}))
-        if (maxtrial >= 3){
-            await this.redis.set({
-                key:this.redis.blockOtpKey({email,subject}),
-                value:1,
-                ttl:7*60
-            })
-            throw new BadRequestExaption(`you have reached the max trial`)
-
-        }
-        const code = createRandomOtp()
-        await this.redis.set({
-            key:this.redis.otpKey({email,subject}),
-            value:await generateHash({plaintext: `${code}`}),
-            ttl:120
-        })
-        emailEvent.emit("sendEmail", async()=>{
-            await sendEmail({
-                to:email,
-                subject,
-                html:emailTemplate({code,title})
-            })
-            await this.redis.incr(this.redis.maxAttemptOtpKey({email,subject}))
-        })
-    }
-    public async signup ({email , username ,password, phone}: SignupDto): Promise<IUser>{
-        // let {username, email, password} = data 
-        // console.log({username, email, password});
-        // const user = await UserModel.create({
-        //     username,
-        //     email,  
-        //     password
-
-        // })
-        const checkUserExist = await this.userRepository.findOne({
-            filter:{email},
-            projection:"email",
-            options:{lean:false}
-        })
-        console.log({checkUserExist});
-        if(checkUserExist){
-            // checkUserExist.email="test";
-            // await checkUserExist.save()
-            throw new ConflictExeption("email already exist")
-        }
-        const user = await this.userRepository.createOne({
-            data:{
-                email,
-                username,  
-                password,
-                phone :phone as string
-            }
-        }) 
-        if (!user){
-            throw new BadRequestExaption("failed to create user")
-
-        }
-        this.sendEmailOtp({email,subject: EmailEnum.Confirm_Email,title:"verify Email"})
-        return user.toJSON()
-    }
-///////////////////////////////////
-    public async confirmEmail ( { email, otp }:ConfirmEmailDto) {
-
-    const hashOtp = await this.redis.get(this.redis.otpKey({ email, subject: EmailEnum.Confirm_Email }))
-    if (!hashOtp) {
-        throw new NotFoundExeption("Expired otp" )
-    }
-
-    const account = await this.userRepository.findOne({
-        filter: { email, confirmEmail: { $exists: false }, provider: ProviderEnum.SYSTEM }
-    })
-    if (!account) {
-        throw new NotFoundExeption( "Fail to find matching account" )
-    }
-
-    if (!await compareHash({ plaintext: otp, ciphertext: hashOtp })) {
-        throw new ConflictExeption( "Invalid otp" )
-    }
-(account as any).confirmEmail = new Date();    await account.save()
-
-    await this.redis.deleteKey(await this.redis.Keys(this.redis.otpKey({ email })))
-    
-    return;
-};
-
-public async resendConfirmEmail ({email}:ResendConfirmEmailDto)  {
-
-    const account = await this.userRepository.findOne({
-        filter: { email, confirmEmail: { $exists: false }, provider: ProviderEnum.SYSTEM }
-    })
-
-    if (!account) {
-        throw new NotFoundExeption("Fail to find matching account" )
-    }
-
-    await this.sendEmailOtp({ email, subject: EmailEnum.Confirm_Email, title: "Verify Email" })
-
-    return;
-};
-
-private async verifyGoogleAccount (idToken:string):Promise<TokenPayload> {
-    const client = new OAuth2Client();
-
-    const ticket = await client.verifyIdToken({
-        idToken,
-        audience:CLIENT_IDS,
-    });
-
-    const payload = ticket.getPayload();
-
-    if (!payload?.email_verified) {
-        throw new BadRequestExaption ( "Invalid token payload" );
-    }
-
-    return payload;
-};
-async loginWithGmail  (idToken:string, issuer:string)  {
-    const payload = await this.verifyGoogleAccount(idToken);
-
-    const user = await this.userRepository.findOne({
-        filter: {
-            email: payload.email as string,
-            provider: ProviderEnum.GOOGLE
-        }
+      filter: {
+        email,
+        provider: ProviderEnum.SYSTEM
+      },
     });
 
     if (!user) {
-        throw new NotFoundExeption("Invalid account provider or not register account" );
+      throw new NotFoundExeption("Invalid credentials");
     }
 
-    return await this.tokenService.createLoginCredentials(user, issuer);
-};
-async signupWithGmail (idToken:string, issuer:string) {
+    if (!user.confirmEmail) {
+      throw new UnauthorizedExeption("Please confirm your email first");
+    }
+
+    if (!user.password) {
+      throw new UnauthorizedExeption(
+        "This account uses Google login. Please sign in with Google.",
+      );
+    }
+
+    if (FCM) {
+      const userId = user._id.toString();
+      await this.redis.addFCM(userId, FCM);
+      const tokens = await this.redis.getFCMs(userId);
+      if (tokens?.length) {
+        await this.notification.sendNotifications({
+          tokens,
+          data: {
+            title: "Login",
+            body: `New Login at ${new Date()}`,
+          },
+        });
+      }
+    }
+
+    const isMatch = await compareHash({
+      plaintext: password,
+      ciphertext: user.password,
+    });
+
+    if (!isMatch) {
+      throw new NotFoundExeption("Invalid credentials........");
+    }
+
+    return await this.tokens.createLoginCredentials(
+      user as unknown as HydratedDocument<IUser>,
+      issuer,
+    );
+  }
+
+  //     SIGNUP
+
+  public async signup(data: SignupDto): Promise<IUser> {
+    const exists = await this.findUserByEmail(data.email);
+
+    if (exists) {
+      throw new ConflictExeption("User already exists");
+    }
+
+    const user = await this.createUser(data);
+
+    if (!user) {
+      throw new BadRequestExaption("User creation failed");
+    }
+
+    await this.redis.sendEmailOtp({
+      email: data.email,
+      subject: EmailEnum.CONFIRM_EMAIL,
+      title: "Verify Email",
+    });
+
+    return user;
+  }
+
+  //     CONFIRM EMAIL
+
+  public async confirmEmail({ email, otp }: confirmEmailDto) {
+    const hashOtp = await this.redis.get(
+      this.redis.otpKey({ email, type: EmailEnum.CONFIRM_EMAIL }),
+    );
+    if (!hashOtp) {
+      throw new NotFoundExeption("OTP expired or invalid");
+    }
+
+    const account = (await this.userRepository.findOne({
+      filter: {
+        email,
+        confirmEmail: { $exists: false },
+        provider: ProviderEnum.SYSTEM,
+      },
+    })) as HydratedDocument<IUser>;
+    if (!account) {
+      throw new NotFoundExeption("Account not found or already confirmed");
+    }
+
+    if (!(await compareHash({ plaintext: otp, ciphertext: hashOtp }))) {
+      throw new ConflictExeption("Invalid OTP");
+    }
+
+    account.confirmEmail = new Date();
+    await account.save();
+
+    await this.redis.deleteKey(
+      this.redis.otpKey({ email, type: EmailEnum.CONFIRM_EMAIL }),
+    );
+    return { message: "Email confirmed successfully" };
+  }
+
+  //     RESEND CONFIRM EMAIL
+
+  public async reSendConfirmEmail({ email }: ResendConfirmEmailDto) {
+    const account = await this.userRepository.findOne({
+      filter: {
+        email,
+        confirmEmail: { $exists: false },
+        provider: ProviderEnum.SYSTEM,
+      },
+    });
+    if (!account) {
+      throw new NotFoundExeption("Account not found or already confirmed");
+    }
+
+    await this.redis.sendEmailOtp({
+      email,
+      subject: EmailEnum.CONFIRM_EMAIL,
+      title: "Verify Email",
+    });
+
+    return { message: "OTP resent successfully" };
+  }
+
+  //    GOOGLE OATH
+
+  // verify Google Account
+  private async verifyGoogleAccount(idToken: string): Promise<TokenPayload> {
+    const client = new OAuth2Client();
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: CLIENT_IDS,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.email_verified) {
+      throw new BadRequestExaption("Fail to verify this account with Google");
+    }
+    return payload;
+  }
+  // login With Gmail
+  async loginWithGmail(idToken: string, issuer: string) {
+    const payload = await this.verifyGoogleAccount(idToken);
+    const user = await this.userRepository.findOne({
+      filter: {
+        email: payload.email as string,
+        provider: ProviderEnum.GOOGLE,
+      },
+    });
+    if (!user) {
+      throw new NotFoundExeption("Invalid login data");
+    }
+    return await this.tokens.createLoginCredentials(
+      user as HydratedDocument<IUser>,
+      issuer,
+    );
+  }
+  // signup With Gmail
+  async signupWithGmail(idToken: string, issuer: string) {
     const payload = await this.verifyGoogleAccount(idToken);
 
-    const checkExist = await this.userRepository.findOne({
-        filter: {
-            email: payload.email as string
-        }
+    const checkUserExist = await this.userRepository.findOne({
+      filter: {
+        email: payload.email as string,
+      },
+    });
+    if (checkUserExist) {
+      if (checkUserExist?.provider == ProviderEnum.SYSTEM) {
+        throw new ConflictExeption(
+          "Account already exist with different provider",
+        );
+      }
+      const account = await this.loginWithGmail(idToken, issuer);
+      return { account, status: 200 };
+    }
+
+    const user = await this.userRepository.createOne({
+      data: {
+        firstName: payload.given_name as string,
+        lastName: payload.family_name as string,
+        email: payload.email as string,
+        profileImage: payload.picture as string,
+        provider: ProviderEnum.GOOGLE,
+
+        confirmEmail: new Date(),
+      },
     });
 
-    console.log({ checkExist });
+    return {
+      status: 201,
+      Credential: await this.tokens.createLoginCredentials(user, issuer),
+    };
+  }
 
-    if (checkExist) {
-        if (checkExist.provider !== ProviderEnum.GOOGLE) {
-            throw new ConflictExeption( "Invalid account provider");
-        }
-        return { status: 200, credentials: await this.loginWithGmail(idToken, issuer) };
-    }
+  //     forgotPassword
 
-    const account = await this.userRepository.createOne({
-        data: {
-            firstName: payload.given_name as string,
-            lastName: payload.family_name as string,
-            email: payload.email as string,
-            profileImage: payload.picture as string,
-            confirmEmail: new Date(), 
-            provider: ProviderEnum.GOOGLE
-        }
+  public async forgotPassword({ email }: forgotPasswordDto) {
+    const user = await this.userRepository.findOne({
+      filter: {
+        email,
+        provider: ProviderEnum.SYSTEM,
+      },
     });
 
-    return { status: 201, credentials: await this.tokenService.createLoginCredentials(account, issuer) };
-};
-
-public async requestForgotPasswordOtp(inputs: ResendConfirmEmailDto): Promise<void> {
-        const { email } = inputs;
-
-        const account = await this.userRepository.findOne({
-            filter: {
-                email,
-                confirmEmail: { $exists: true },
-                provider: ProviderEnum.SYSTEM
-            }
-        });
-
-        if (!account) {
-            throw new NotFoundExeption("Fail to find matching account");
-        }
-
-        await this.sendEmailOtp({ 
-            email, 
-            subject: EmailEnum.Forgot_Password, 
-            title: "Reset Code" 
-        });
+    if (!user) {
+      throw new NotFoundExeption("User not found");
     }
 
+    await this.redis.sendEmailOtp({
+      email,
+      subject: EmailEnum.RESET_PASSWORD,
+      title: "Reset Password",
+    });
 
-public async verifyForgotPasswordOtp({ email, otp }: ConfirmEmailDto): Promise<void> {
-        const hashOtp = await this.redis.get(this.redis.otpKey({ email, subject: EmailEnum.Forgot_Password }));
-        
-        if (!hashOtp) {
-            throw new NotFoundExeption("Expired or invalid otp");
-        }
+    return { message: "Reset password OTP sent successfully" };
+  }
 
-        if (!await compareHash({ plaintext: otp, ciphertext: hashOtp })) {
-            throw new ConflictExeption("Invalid otp");
-        }
+  //     resetPassword
 
+  public async resetPassword({ email, otp, password }: resetPasswordDto) {
+    const hashOtp = await this.redis.get(
+      this.redis.otpKey({ email, type: EmailEnum.RESET_PASSWORD }),
+    );
+
+    if (!hashOtp) {
+      throw new NotFoundExeption("OTP expired or invalid");
     }
 
+    const user = (await this.userRepository.findOne({
+      filter: {
+        email,
+        provider: ProviderEnum.SYSTEM,
+      },
+    })) as HydratedDocument<IUser>;
 
-public async resetForgotPasswordOtp(inputs: any): Promise<void> {
-        const { email, otp, password } = inputs;
-
-        const hashOtp = await this.redis.get(this.redis.otpKey({ email, subject: EmailEnum.Forgot_Password }));
-        if (!hashOtp || !await compareHash({ plaintext: otp, ciphertext: hashOtp })) {
-            throw new ConflictExeption("Invalid or expired otp process");
-        }
-
-        const hashedPassword = await generateHash({ plaintext: password });
-
-        const account = await this.userRepository.findOneAndUpdate({
-            filter: { email, provider: ProviderEnum.SYSTEM },
-            update: { password: hashedPassword },
-            options: {} as any
-        });
-
-        if (!account) {
-            throw new NotFoundExeption("Fail to update password");
-        }
-
-        await this.redis.deleteKey(this.redis.otpKey({ email, subject: EmailEnum.Forgot_Password }));
+    if (!user) {
+      throw new NotFoundExeption("User not found");
     }
 
-} 
+    const isValidOtp = await compareHash({
+      plaintext: otp,
+      ciphertext: hashOtp,
+    });
 
-export default new AuthnticationService()
+    if (!isValidOtp) {
+      throw new ConflictExeption("Invalid OTP");
+    }
+
+    // The User model hashes modified passwords in its pre-save hook.
+    user.password = password;
+    await user.save();
+
+    await this.redis.deleteKey(
+      this.redis.otpKey({ email, type: EmailEnum.RESET_PASSWORD }),
+    );
+
+    return { message: "Password reset successfully" };
+  }
+
+  /* ================= HELPERS ================= */
+
+  public async findUserByEmail(email: string): Promise<IUser | null> {
+    const user = await this.userRepository.findOne({
+      filter: { email },
+      projection: { email: 1 },
+    });
+
+    return user ? this.normalizeUser(user) : null;
+  }
+
+  public async createUser(data: SignupDto): Promise<IUser> {
+    const securedData = await this.secureUserData(data);
+
+    const user = await this.userRepository.createOne({ data: securedData });
+
+    if (!user) throw new BadRequestExaption("User creation failed");
+
+    return this.normalizeUser(user);
+  }
+
+  private async secureUserData(data: SignupDto) {
+    const { username, confirmPassword: _confirmPassword, FCM: _FCM, ...userData } =
+      data;
+    const nameParts = username.trim().split(/\s+/);
+    const firstName = nameParts[0] ?? username;
+    const lastName = nameParts.slice(1).join(" ") || firstName;
+
+    return {
+      ...userData,
+      firstName,
+      lastName,
+      slug: `${firstName}-${lastName}`.toLowerCase(),
+    };
+  }
+
+  public async deleteUsers(
+    filter: Partial<IUser> | Record<string, unknown>,
+    options?: any,
+  ): Promise<DeleteResult> {
+    return this.userRepository.deleteMany({ filter });
+  }
+
+  private normalizeUser(user: any): IUser {
+    return user?.toJSON?.() ?? (user as IUser);
+  }
+}
+
+export default new AuthenticationService();

@@ -1,196 +1,273 @@
 import { HydratedDocument, Types } from "mongoose";
-import { createCommentParamsDto, createCommentBodyDto, createReplyOnCommentParamsDto } from "./comment.dto";
-import { IComment, IPost, IUser } from "../../common/interfaces";
-import { NotificationService, notificationService, RedisService, redisService, S3Service } from "../../common/services";
-import { CommentRepository, PostRepository, UserRepository } from "../../DB/repository";
-import { BadRequestExaption, NotFoundExeption } from "../../common/exception/domain.exception";
-import { getAvailability } from "../../common/utils/post";
+import { IComment, IUser } from "../../common/interfaces";
+import { ForbiddenExeption, NotFoundExeption } from "../../common/exception";
+import {
+  CommentRepository,
+  NotificationRepository,
+  PostRepository,
+} from "../../DB/repository";
+import {
+  CreateCommentDto,
+  UpdateCommentDto,
+  ReactCommentDto,
+} from "./comment.dto";
+import { NotificationTypeEnum } from "../../common/enums";
 
-import { toObjectId } from "../../common/utils/objectid";
 export class CommentService {
-private readonly redis: RedisService;
-    private readonly userRepository: UserRepository;
-    private readonly postRepository: PostRepository;
-    private readonly notification: NotificationService;
-    private readonly s3: S3Service;
-    private readonly commentRepository: CommentRepository;
+  private readonly commentRepository: CommentRepository;
+  private readonly postRepository: PostRepository;
+  private readonly notificationRepository: NotificationRepository;
 
-    constructor() {
-        this.userRepository = new UserRepository();
-        this.postRepository = new PostRepository();
-        this.redis = redisService;
-        this.notification = notificationService;
-        this.s3 = new S3Service();
-        this.commentRepository = new CommentRepository();
+  constructor() {
+    this.commentRepository = new CommentRepository();
+    this.postRepository = new PostRepository();
+    this.notificationRepository = new NotificationRepository();
+  }
+
+  async createComment(
+    data: CreateCommentDto,
+    user: HydratedDocument<IUser>,
+  ): Promise<IComment> {
+    const post = await this.postRepository.findOne({
+      filter: { _id: data.postId },
+    });
+    if (!post || (post as any).deletedAt) {
+      throw new NotFoundExeption("Post not found");
     }
 
+    const payload = {
+      postId: new Types.ObjectId(data.postId),
+      content: data.content,
+      attachments: data.attachments || [],
+      createdBy: user._id,
+      replies: [],
+    };
 
-async createComment(
-        {postId}:createCommentParamsDto,{ content, files, tags }: createCommentBodyDto,
-        user: HydratedDocument<IUser> 
-    ) :Promise<IComment> {
-        const post = await this.postRepository.findOne({
-        filter: {
-        _id: postId,
-        $or: getAvailability(user)
+    const comment = await this.commentRepository.createOne({ data: payload });
+
+    const recipientId = (post.createdBy as any).toString();
+    if (recipientId !== user._id.toString()) {
+      await this.notificationRepository.createOne({
+        data: {
+          title: "Someone commented on your post",
+          message: data.content,
+          senderId: user._id,
+          recipientId: new Types.ObjectId(recipientId),
+          type: NotificationTypeEnum.COMMENT,
+          relatedEntityId: comment._id,
+          relatedEntityType: "POST",
+          isRead: false,
+        },
+      });
     }
-})
-        if (!post) {
-            throw new NotFoundExeption("Fail to find matching post")
-        }
-        const mentions: Types.ObjectId[] = [];
-        const FCM_Tokens: string[] = [];
 
-        if (tags?.length) {
-            const mentionedAccounts = await this.userRepository.find({
-                filter: {
-                    _id: { $in: tags }
-                }
-            });
+    return comment;
+  }
 
-            if (mentionedAccounts.length !== tags.length) {
-                throw new NotFoundExeption("Fail to find some or all mentioned accounts");
-            }
+  async replyToComment(
+    parentCommentId: string,
+    data: { content: string; attachments?: string[] },
+    user: HydratedDocument<IUser>,
+  ): Promise<IComment> {
+    const parentComment = await this.commentRepository.findOne({
+      filter: { _id: parentCommentId },
+    });
+    if (!parentComment || (parentComment as any).deletedAt) {
+      throw new NotFoundExeption("Parent comment not found");
+    }
 
-            for (const tag of tags) {
-                mentions.push(toObjectId(tag));
-                
-                (await this.redis.getFCMs(tag) || []).map(token => FCM_Tokens.push(token));
-            }
-        }
-        const folderId = post.folderId;
-            let attachments: string[] = []
-            if (files?.length) {
-                attachments = await this.s3.uploadAssets({
-                    files: files as Express.Multer.File[],
-                    path: `Post/${folderId}`
-                })
-            }
-            const comment = await this.commentRepository.createOne({
-                data: {
-                    createdBy: user._id,
-                    content: content as string,
-                    attachments,
-                    postId: post._id,
-                    tags: mentions
-                }
-            })
-        if (!comment) {
-            if (attachments.length) {
-                await this.s3.deleteAssets({
-                    Keys: attachments.map(ele =>{ 
-                        return{Key:ele}
-                    })
-                });
-            }
-    throw new BadRequestExaption("Fail")
+    const replyData = {
+      createdBy: user._id,
+      content: data.content,
+      attachments: data.attachments || [],
+      reactions: [],
+    };
+
+    const updatedComment = await this.commentRepository.updateOne({
+      filter: { _id: parentCommentId },
+      update: {
+        $push: { replies: replyData },
+      },
+    });
+
+    if (!updatedComment.matchedCount) {
+      throw new NotFoundExeption("Failed to add reply");
+    }
+
+    const recipientId = (parentComment.createdBy as any).toString();
+    if (recipientId !== user._id.toString()) {
+      await this.notificationRepository.createOne({
+        data: {
+          title: "Someone replied to your comment",
+          message: data.content,
+          senderId: user._id,
+          recipientId: new Types.ObjectId(recipientId),
+          type: NotificationTypeEnum.REPLY,
+          relatedEntityId: parentComment._id,
+          relatedEntityType: "COMMENT",
+          isRead: false,
+        },
+      });
+    }
+
+    const updatedParentComment = await this.commentRepository.findOne({
+      filter: { _id: parentCommentId },
+      options: {
+        populate: [
+          { path: "createdBy", select: "firstName lastName profilePicture" },
+          {
+            path: "replies.createdBy",
+            select: "firstName lastName profilePicture",
+          },
+        ],
+      },
+    });
+
+    if (!updatedParentComment) {
+      throw new NotFoundExeption("Parent comment not found");
+    }
+
+    return updatedParentComment;
+  }
+
+  async listPostComments(postId: string): Promise<IComment[]> {
+    return this.commentRepository.find({
+      filter: { postId, deletedAt: null },
+      options: {
+        lean: true,
+        sort: { createdAt: 1 },
+        populate: [
+          { path: "createdBy", select: "firstName lastName profilePicture" },
+          {
+            path: "replies.createdBy",
+            select: "firstName lastName profilePicture",
+          },
+        ],
+      },
+    });
+  }
+
+  async getCommentById(id: string): Promise<IComment> {
+    const comment = await this.commentRepository.findOne({
+      filter: { _id: id },
+      options: {
+        populate: [
+          { path: "createdBy", select: "firstName lastName profilePicture" },
+          {
+            path: "replies.createdBy",
+            select: "firstName lastName profilePicture",
+          },
+        ],
+      },
+    });
+    if (!comment || (comment as any).deletedAt) {
+      throw new NotFoundExeption("Comment not found");
+    }
+    return comment;
+  }
+
+  async updateComment(
+    id: string,
+    data: UpdateCommentDto,
+    user: HydratedDocument<IUser>,
+  ): Promise<IComment> {
+    const comment = await this.commentRepository.findOne({
+      filter: { _id: id },
+    });
+    if (!comment || (comment as any).deletedAt) {
+      throw new NotFoundExeption("Comment not found");
+    }
+
+    const ownerId = (comment.createdBy as any).toString();
+    if (ownerId !== user._id.toString()) {
+      throw new ForbiddenExeption("You cannot update this comment");
+    }
+
+    const updated = await this.commentRepository.updateOne({
+      filter: { _id: id },
+      update: {
+        $set: {
+          ...data,
+        },
+      },
+    });
+
+    if (!updated.matchedCount) {
+      throw new NotFoundExeption("Failed to update comment");
+    }
+
+    return this.getCommentById(id);
+  }
+
+  async deleteComment(
+    id: string,
+    user: HydratedDocument<IUser>,
+  ): Promise<IComment> {
+    const comment = await this.commentRepository.findOne({
+      filter: { _id: id },
+    });
+    if (!comment || (comment as any).deletedAt) {
+      throw new NotFoundExeption("Comment not found");
+    }
+
+    const ownerId = (comment.createdBy as any).toString();
+    if (ownerId !== user._id.toString()) {
+      throw new ForbiddenExeption("You cannot delete this comment");
+    }
+
+    const deleted = await this.commentRepository.updateOne({
+      filter: { _id: id },
+      update: { deletedAt: new Date() },
+    });
+
+    if (!deleted.matchedCount) {
+      throw new NotFoundExeption("Failed to delete comment");
+    }
+    comment.deletedAt = new Date();
+    return comment;
+  }
+
+  async reaction(
+    id: string,
+    data: ReactCommentDto,
+    user: HydratedDocument<IUser>,
+  ): Promise<IComment> {
+    const comment = await this.commentRepository.findOne({
+      filter: { _id: id },
+    });
+    if (!comment || (comment as any).deletedAt) {
+      throw new NotFoundExeption("Comment not found");
+    }
+
+    const existingReactions = ((comment as IComment & { reactions?: unknown[] })
+      .reactions || []) as Array<{
+      emoji: string;
+      userId: Types.ObjectId;
+    }>;
+
+    const emoji = data.emoji;
+    const existingIndex = existingReactions.findIndex(
+      (item) =>
+        item.emoji === emoji && item.userId.toString() === user._id.toString(),
+    );
+    const reactions = [...existingReactions];
+
+    if (existingIndex >= 0) {
+      reactions.splice(existingIndex, 1);
+    } else {
+      reactions.push({ emoji, userId: user._id as Types.ObjectId });
+    }
+
+    const updated = await this.commentRepository.updateOne({
+      filter: { _id: id },
+      update: { reactions },
+    });
+
+    if (!updated.matchedCount) {
+      throw new NotFoundExeption("Failed to update reaction");
+    }
+    return this.getCommentById(id);
+  }
 }
 
-        if (FCM_Tokens.length) {
-            await this.notification.sendNotifications({
-                tokens: FCM_Tokens, data: {
-                    title: "Post mention",
-                    body: JSON.stringify({
-                        message: `${user.username} mentioned you in his comment`,
-                        postId: post._id,
-                        commentId: comment._id
-                    })
-                }
-            })
-        }
-        return comment.toJSON();
-    }
-
-async replyOnComment(
-        {postId, commentId}:createReplyOnCommentParamsDto,{ content, files, tags }: createCommentBodyDto,
-        user: HydratedDocument<IUser> 
-    ) :Promise<IComment> {
-        const comment = await this.commentRepository.findOne({
-        filter: {
-        _id: commentId,
-        postId:postId,
-    } ,
-    options: {  
-        populate: [{
-            path: "postId",
-            match: {
-                $or: getAvailability(user)
-            }
-        }]
-    }
-})
-
-    if (!comment || !comment.postId) {
-    throw new NotFoundExeption("Fail to find matching comment");
-}
-        const mentions: Types.ObjectId[] = [];
-        const FCM_Tokens: string[] = [];
-
-        if (tags?.length) {
-            const mentionedAccounts = await this.userRepository.find({
-                filter: {
-                    _id: { $in: tags }
-                }
-            });
-
-            if (mentionedAccounts.length !== tags.length) {
-                throw new NotFoundExeption("Fail to find some or all mentioned accounts");
-            }
-
-            for (const tag of tags) {
-                mentions.push(toObjectId(tag));
-                
-                (await this.redis.getFCMs(tag) || []).map(token => FCM_Tokens.push(token));
-            }
-        }
-        const post = comment.postId as HydratedDocument<IPost>;
-        const folderId = post.folderId;
-            let attachments: string[] = []
-            if (files?.length) {
-                attachments = await this.s3.uploadAssets({
-                    files: files as Express.Multer.File[],
-                    path: `Post/${folderId}`
-                })
-            }
-            const reply = await this.commentRepository.createOne({
-                data: {
-                    createdBy: user._id,
-                    content: content as string,
-                    attachments,
-                    postId: post._id,
-                    commentId: comment._id,
-                    tags: mentions
-                }
-            })
-        if (!reply) {
-            if (attachments.length) {
-                await this.s3.deleteAssets({
-                    Keys: attachments.map(ele =>{ 
-                        return{Key:ele}
-                    })
-                });
-            }
-    throw new BadRequestExaption("Fail")
-}
-
-        if (FCM_Tokens.length) {
-            await this.notification.sendNotifications({
-                tokens: FCM_Tokens, data: {
-                    title: "Post mention",
-                    body: JSON.stringify({
-                        message: `${user.username} mentioned you in his comment`,
-                        postId: post._id,
-                        commentId: comment._id,
-                        replyId: reply._id
-                    })
-                }
-            })
-        }
-        return reply.toJSON();
-    }
-
-
-
-
-}
-export const commentService = new CommentService()
+export default new CommentService();

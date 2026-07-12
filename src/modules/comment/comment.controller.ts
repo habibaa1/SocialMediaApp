@@ -1,35 +1,143 @@
-import {Router} from "express";
-import { authentication,validation} from "../middleware";
+import { NextFunction, Response, Router } from "express";
+import { authentication, validation } from "../../middleware";
 import { successResponse } from "../../common/response";
-import { Request, Response, NextFunction } from "express";
-import {cloudFileUplad , fileFieldValidation } from "../../common/utils/multer";
-import * as validators from "./comment.validation"
-import { commentService } from "./comment.service";
-import { createCommentParamsDto , createReplyOnCommentParamsDto } from "./comment.dto";
-import { IComment } from "../../common/interfaces";
-const router = Router({ mergeParams: true });
+import { IAuthenticatedRequest } from "../../common/types/express.types";
+import commentService from "./comment.service";
+import * as validators from "./comment.validation";
+
+const router = Router();
 
 router.post(
-    "/",
-    authentication(),
-    cloudFileUplad({ validation: fileFieldValidation.image }).array("attachments", 2),
-    validation(validators.createComment),
-    async (req: Request, res: Response, next: NextFunction): Promise<Response> => {
-        const data = await commentService.createComment(req.params as createCommentParamsDto,{...req.body, files: req.files}, req.user) 
-        return successResponse<IComment>({ res, status: 201 , data })
+  "/",
+  authentication(),
+  validation(validators.createCommentSchema),
+  async (req: IAuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const data = await commentService.createComment(req.body, req.user);
+      return successResponse({
+        res,
+        status: 201,
+        message: "Comment created successfully",
+        data,
+      });
+    } catch (error) {
+      return next(error);
     }
-)
+  },
+);
+
+router.get(
+  "/post/:postId",
+  authentication(),
+  validation(validators.listPostCommentsSchema),
+  async (req: IAuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const data = await commentService.listPostComments(
+        String(req.params.postId),
+      );
+      return successResponse({ res, data });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.get(
+  "/:id",
+  authentication(),
+  validation(validators.getCommentSchema),
+  async (req: IAuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const data = await commentService.getCommentById(String(req.params.id));
+      return successResponse({ res, data });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.patch(
+  "/:id",
+  authentication(),
+  validation(validators.updateCommentSchema),
+  async (req: IAuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const data = await commentService.updateComment(
+        String(req.params.id),
+        req.body,
+        req.user,
+      );
+      return successResponse({
+        res,
+        message: "Comment updated successfully",
+        data,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+router.delete(
+  "/:id",
+  authentication(),
+  validation(validators.deleteCommentSchema),
+  async (req: IAuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      await commentService.deleteComment(String(req.params.id), req.user);
+      return successResponse({
+        res,
+        message: "Comment deleted successfully",
+      });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
 
 router.post(
-    "/:commentId/reply",
-    authentication(),
-    cloudFileUplad({ validation: fileFieldValidation.image }).array("attachments", 2),
-    validation(validators.replyOnComment),
-    async (req: Request, res: Response, next: NextFunction): Promise<Response> => {
-        const data = await commentService.replyOnComment(req.params as createReplyOnCommentParamsDto,{...req.body, files: req.files}, req.user) 
-        return successResponse<IComment>({ res, status: 201 , data })
+  "/:id/react",
+  authentication(),
+  validation(validators.reactCommentSchema),
+  async (req: IAuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const data = await commentService.reaction(
+        String(req.params.id),
+        req.body,
+        req.user,
+      );
+      return successResponse({
+        res,
+        message: "Comment reaction updated",
+        data,
+      });
+    } catch (error) {
+      return next(error);
     }
-)
+  },
+);
 
+router.post(
+  "/:id/reply",
+  authentication(),
+  validation(validators.replyCommentSchema),
+  async (req: IAuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const data = await commentService.replyToComment(
+        String(req.params.id),
+        req.body,
+        req.user,
+      );
+      return successResponse({
+        res,
+        status: 201,
+        message: "Reply created successfully",
+        data,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
 
 export default router;

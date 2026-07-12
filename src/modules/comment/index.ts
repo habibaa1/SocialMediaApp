@@ -1,1 +1,1 @@
-export {default as CommentRouter} from './comment.controller'
+export { default as commentRouter } from "./comment.controller";

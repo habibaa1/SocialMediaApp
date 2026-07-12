@@ -1,83 +1,84 @@
-import { z } from 'zod';
-import { AvailabilityEnum } from '../../common/enums';
-import { Types } from 'mongoose';
-import { generalValidationFields } from '../../common/validation';
-import { fileFieldValidation } from '../../common/utils/multer';
+import { z } from "zod";
 
-export const createPost = {
-    body: z.strictObject({
-        content: z.string().optional(),
-        files: z.array(generalValidationFields.file(fileFieldValidation.image)).optional(),
-        tags: z.array(z.string()).optional(),
-        availability: z.coerce.number().default(AvailabilityEnum.PUBLIC)
-    }).superRefine((args, ctx) => {
-        if (!args.files?.length && !args.content) {
-            ctx.addIssue({
-                code: "custom",
-                path: ['content'],
-                message: "Content is required"
-            })
-        }
-        if (args.tags?.length) {
+import { generalValidation } from "../../common/validation";
 
-    const uniqueTags = [...new Set(args.tags)]
-            if (uniqueTags.length !== args.tags.length) {
-                ctx.addIssue({
-                    code: "custom",
-                    path: ['tags'],
-                    message: "Duplicated tag"
-                })
-            }
-                for (const tag of args.tags) {
-                    if (!Types.ObjectId.isValid(tag)) {
-                        ctx.addIssue({
-                            code: "custom",
-                            path: ['tags'],
-                            message: `Invalid tagged objectId ${tag}`
-                        })
-                    }
-            }
-        }
-    })
-}
+import { AvailabilityEnum } from "../../common/Enums";
 
-export const updatePost = {
-        params: z.strictObject({
-        postId: generalValidationFields.id
-    }),
-    body: z.strictObject({
-        content: z.string().optional(),
-        files: z.array(generalValidationFields.file(fileFieldValidation.image)).optional(),
-        removeFiles: z.array(z.string()).optional(),
-        removeTags: z.array(z.string()).optional(),
+const postBaseSchema = z.strictObject({
+  folderId: z.string().min(1, {
+    message: "folderId is required",
+  }),
 
-        tags: z.array(generalValidationFields.id).optional(),
-        availability: z.coerce.number().optional()
-    }).superRefine((args, ctx) => {
-        if (!Object.values(args)?.length) {
-            ctx.addIssue({
-                code: "custom",
-                message: "insert data to update the post"
-            })
-        }
-        if (args.tags?.length) {
+  content: z.string().optional(),
 
-    const uniqueTags = [...new Set(args.tags)]
-            if (uniqueTags.length !== args.tags.length) {
-                ctx.addIssue({
-                    code: "custom",
-                    path: ['tags'],
-                    message: "Duplicated tag"
-                })
-            }
-        }
-    })
-}
-export const reactPost = {
-    params: z.strictObject({
-        postId: generalValidationFields.id
-    }),
-    query: z.strictObject({
-        react: z.coerce.number()
-    })
-}
+  attachments: z.array(z.string()).optional(),
+
+  availability: z.nativeEnum(AvailabilityEnum).optional(),
+});
+
+const postUpdateBodySchema = z
+  .strictObject({
+    folderId: z.string().min(1).optional(),
+
+    content: z.string().optional(),
+
+    attachments: z.array(z.string()).optional(),
+
+    availability: z.nativeEnum(AvailabilityEnum).optional(),
+  })
+
+  .refine(
+    (value) =>
+      Boolean(value.folderId) ||
+      Boolean(value.content?.trim()) ||
+      (value.attachments?.length ?? 0) > 0 ||
+      value.availability !== undefined,
+
+    {
+      message: "At least one field must be provided to update",
+    },
+  );
+
+export const createPostSchema = {
+  body: postBaseSchema.refine(
+    (value) =>
+      Boolean(value.content?.trim()) || (value.attachments?.length ?? 0) > 0,
+
+    {
+      message: "content or attachments are required",
+    },
+  ),
+};
+
+export const updatePostSchema = {
+  params: z.strictObject({
+    id: generalValidation.id,
+  }),
+
+  body: postUpdateBodySchema,
+};
+
+export const getPostSchema = {
+  params: z.strictObject({
+    id: generalValidation.id,
+  }),
+};
+
+export const likePostSchema = getPostSchema;
+
+export const reactPostSchema = {
+  params: z.strictObject({
+    id: generalValidation.id,
+  }),
+
+  body: z.strictObject({
+    emoji: z.string().min(1).max(4),
+  }),
+};
+
+export const deletePostSchema = getPostSchema;
+
+export const reactOnPostGQL = z.strictObject({
+  postID: generalValidation.id,
+  react: z.coerce.number(),
+});

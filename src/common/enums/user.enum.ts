@@ -1,12 +1,12 @@
 export enum GenderEnum {
-    MALE,
-    FEMALE
+    MALE = 'MALE',
+    FEMALE = 'FEMALE'
 }
 export enum RoleEnum {
-    USER,
-    ADMIN
+    USER = 'USER',
+    ADMIN = 'ADMIN'
 }
 export enum ProviderEnum {
-    SYSTEM,
-    GOOGLE
-};
+    SYSTEM = 'SYSTEM',
+    GOOGLE = 'GOOGLE'
+}

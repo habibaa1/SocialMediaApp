@@ -1,15 +1,13 @@
 import type { Express,Request,Response,NextFunction} from "express";
 import express from "express";
-import { authRouter, userRouter , PostRouter, schema} from "./modules";
+import { authRouter, userRouter, postRouter, schema } from "./modules";
 import { globalErroHandler } from "./modules/middleware";
 import { connectDB } from "./DB/connections.db";
 import { PORT } from "./config/config";
 import { redisService, s3Service } from "./common/services";
 import cors from "cors"
 // import { UserModel } from "./DB/model";
-import { UserRepository } from "./DB/repository/user.reposatory";
 // import { GenderEnum } from "./common/enums";
-import { Types } from "mongoose";
 import { successResponse } from "./common/response";
 import {pipeline} from "node:stream"
 import { promisify } from "node:util";
@@ -45,7 +43,7 @@ app.use(cors());
     //application routes
     app.use("/auth", authRouter);
     app.use("/user",userRouter);
-    app.use("/post",PostRouter);
+    app.use("/post", postRouter);
     app.all('/graphql', createHandler({ schema: schema }));
 
 
@@ -54,7 +52,7 @@ app.get("/uploads/*path", async (req: express.Request, res: express.Response, ne
     const { path } = req.params as { path: string[] };
     const Key = path.join("/");
     
-    const { Body, ContentType } = await s3Service.getAsset({ Key });
+    const { Body, ContentType } = await s3Service.getFile({ Key });
     console.log({ Body, ContentType });
     res.setHeader("Content-Type", ContentType || "application/octet-stream");
     res.set("Cross-Origin-Resource-Policy", "cross-origin");
@@ -68,7 +66,10 @@ app.get("/pre-signed/*path", async (req: express.Request, res: express.Response,
     const { path } = req.params as { path: string[] };
 
     const Key = path.join("/");
-    const url = await s3Service.CreatePreSignedFetchLink({ Key , download, fileName });
+    const url = await s3Service.createPreSignedDownloadLink({
+        Key,
+        ...(download === "true" && { downloadName: fileName }),
+    });
     return successResponse({ res, data:{ url } });
 });
     //application error
@@ -82,7 +83,6 @@ app.get("/pre-signed/*path", async (req: express.Request, res: express.Response,
 
 
 try {
-    const userRepository = new UserRepository()
     // const user = await userRepository.find({
     //     filter:{
     //     // _id: Types.ObjectId.createFromHexString('69f74525a162b9e7a94407a3')
@@ -92,17 +92,6 @@ try {
     //     }
     // })
     // console.log(user);
-
-        const user = await userRepository.deleteOne({
-        filter:{
-        _id: Types.ObjectId.createFromHexString('69fe27744b49da3e63c0c967'),
-        force:true
-        // gender:GenderEnum.FEMALE,
-        // paranoid:false,
-        // deletedAt:{$exists:true}
-        },
-        })
-            // console.log(user);
 
     
     

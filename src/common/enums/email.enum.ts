@@ -1,4 +1,5 @@
 export enum EmailEnum {
-    Confirm_Email = "Confirm_email",
-    Forgot_Password = "Forgot_password",
+    CONFIRM_EMAIL= "Confirm_Email",
+    FORGOT_PASSWORD= "ForgotPassword",
+    RESET_PASSWORD= "ResetPassword",
 }

@@ -1,6 +1,5 @@
 import { UserService } from "../user.service";
-import { HydratedDocument } from "mongoose";
-import { IUser } from "../../../common/interfaces";    
+import { BadRequestExaption } from "../../../common/exception";
 
 export class UserResolver {
     private userService: UserService;
@@ -11,7 +10,11 @@ export class UserResolver {
 
     profile = async (parent: unknown, args: { search?: string }) => {
 
-        const data = await this.userService.profile({}as HydratedDocument<IUser>)
+        if (!args.search) {
+            throw new BadRequestExaption("User ID is required");
+        }
+
+        const data = await this.userService.profile(args.search);
 
         return {message:`Hello`, data};
 
