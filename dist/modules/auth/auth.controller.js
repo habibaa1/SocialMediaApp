@@ -40,51 +40,104 @@ const express_1 = require("express");
 const auth_service_1 = __importDefault(require("./auth.service"));
 const response_1 = require("../../common/response");
 const validators = __importStar(require("./auth.validation"));
-const middleware_1 = require("../middleware");
+const middleware_1 = require("../../middleware");
 const router = (0, express_1.Router)();
-router.post("/signup", (0, middleware_1.validation)(validators.signup), async (req, res) => {
-    let data = await auth_service_1.default.signup(req.body);
-    (0, response_1.successResponse)({ res, status: 201, data });
+router.post("/login", (0, middleware_1.validation)(validators.loginSchema), async (req, res, next) => {
+    try {
+        const data = await auth_service_1.default.login(req.body, `${req.protocol}://${req.get("host")}`);
+        (0, response_1.successResponse)({
+            res,
+            data,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
 });
-router.post("/login", (0, middleware_1.validation)(validators.login), async (req, res, next) => {
-    const data = await auth_service_1.default.login(req.body, `${req.protocol}://${req.host}`);
-    return (0, response_1.successResponse)({ res, data });
+router.post("/signup", (0, middleware_1.validation)(validators.signupSchema), async (req, res, next) => {
+    try {
+        const result = await auth_service_1.default.signup(req.body);
+        (0, response_1.successResponse)({
+            res,
+            status: 201,
+            message: "Signup successful",
+            data: result,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
 });
-router.patch("/confirm-email", (0, middleware_1.validation)(validators.ConfirmEmail), async (req, res, next) => {
-    await auth_service_1.default.confirmEmail(req.body);
-    return (0, response_1.successResponse)({ res });
+router.patch("/confirm-email", (0, middleware_1.validation)(validators.confirmEmailSchema), async (req, res, next) => {
+    try {
+        const account = await auth_service_1.default.confirmEmail(req.body);
+        (0, response_1.successResponse)({
+            res,
+            data: account,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
 });
-router.patch("/resend-confirm-email", (0, middleware_1.validation)(validators.resendConfirmEmail), async (req, res, next) => {
-    await auth_service_1.default.resendConfirmEmail(req.body);
-    return (0, response_1.successResponse)({ res });
+router.patch("/resend-confirm-email", (0, middleware_1.validation)(validators.reSendConfirmEmailSchema), async (req, res, next) => {
+    try {
+        const account = await auth_service_1.default.reSendConfirmEmail(req.body);
+        (0, response_1.successResponse)({
+            res,
+            data: account,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post("/forgot-password", (0, middleware_1.validation)(validators.forgotPasswordSchema), async (req, res, next) => {
+    try {
+        const data = await auth_service_1.default.forgotPassword(req.body);
+        (0, response_1.successResponse)({
+            res,
+            data,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.patch("/reset-password", (0, middleware_1.validation)(validators.resetPasswordSchema), async (req, res, next) => {
+    try {
+        const data = await auth_service_1.default.resetPassword(req.body);
+        (0, response_1.successResponse)({
+            res,
+            data,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
 });
 router.post("/signup/gmail", async (req, res, next) => {
-    console.log(req.body);
-    const { status, credentials } = await auth_service_1.default.signupWithGmail(req.body.idToken, `${req.protocol}://${req.host}`);
-    return (0, response_1.successResponse)({ res, status, data: { credentials } });
-});
-router.post("/forgot-password", (0, middleware_1.validation)(validators.resendConfirmEmail), async (req, res, next) => {
     try {
-        await auth_service_1.default.requestForgotPasswordOtp(req.body);
-        res.status(200).json({ message: "Reset code sent to your email" });
+        const result = await auth_service_1.default.signupWithGmail(req.body, `${req.protocol}://${req.get("host")}`);
+        (0, response_1.successResponse)({
+            res,
+            status: 201,
+            message: "Gmail signup successful",
+            data: result,
+        });
     }
     catch (error) {
         next(error);
     }
 });
-router.post("/verify-forgot-password", (0, middleware_1.validation)(validators.ConfirmEmail), async (req, res, next) => {
+router.post("/login/gmail", async (req, res, next) => {
     try {
-        await auth_service_1.default.verifyForgotPasswordOtp(req.body);
-        res.status(200).json({ message: "OTP verified successfully" });
-    }
-    catch (error) {
-        next(error);
-    }
-});
-router.patch("/reset-password", (0, middleware_1.validation)(validators.resetForgotPassword), async (req, res, next) => {
-    try {
-        await auth_service_1.default.resetForgotPasswordOtp(req.body);
-        res.status(200).json({ message: "Password updated successfully" });
+        const result = await auth_service_1.default.loginWithGmail(req.body, `${req.protocol}://${req.get("host")}`);
+        (0, response_1.successResponse)({
+            res,
+            message: "Gmail login successful",
+            data: result,
+        });
     }
     catch (error) {
         next(error);

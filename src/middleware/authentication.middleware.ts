@@ -1,10 +1,10 @@
 import { NextFunction, Request, Response } from "express";
-import { UnauthorizedException } from "../common/exceptions";
+import { UnauthorizedExeption } from "../common/exception";
 import { TokenService } from "../common/services";
-import { tokenTypeEnum } from "../common/Enums";
+import { TokenTypeEnum,  } from "../common/enums";
 
 export const authentication = (
-  tokenType: tokenTypeEnum = tokenTypeEnum.ACCESS,
+  tokenType: TokenTypeEnum = TokenTypeEnum.ACCESS,
 ) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     const Service = new TokenService();
@@ -13,7 +13,7 @@ export const authentication = (
     console.log({ key, credential });
 
     if (!key || !credential) {
-      throw new UnauthorizedException("Missing authorization");
+      throw new UnauthorizedExeption("Missing authorization");
     }
 
     switch (key) {

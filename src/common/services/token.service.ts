@@ -2,21 +2,21 @@ import jwt, { JwtPayload, SignOptions } from "jsonwebtoken";
 import {
   ACCESS_EXPIRES_IN,
   REFRESH_EXPIRES_IN,
-  System_REFRESH_TOKEN_SECRET_KEY,
   System_TOKEN_SECRET_KEY,
-  User_REFRESH_TOKEN_SECRET_KEY,
+  System_REFRESH_TOKEN_SECRET_KEY,
   User_TOKEN_SECRET_KEY,
+  User_REFRESH_TOKEN_SECRET_KEY,
 } from "../../config/config";
-import { RoleEnum, tokenTypeEnum } from "../Enums";
+import { RoleEnum, TokenTypeEnum } from "../enums";
 import {
-  BadRequestException,
-  NotFoundException,
-  UnauthorizedException,
-} from "../exceptions";
+  BadRequestExaption,
+  NotFoundExeption,
+  UnauthorizedExeption,
+} from "../exception";
 import { RedisService, redisService } from "./redis.service";
 import { UserRepository } from "../../DB/repository";
 import { HydratedDocument, Types } from "mongoose";
-import { IUser } from "../interface";
+import { IUser } from "../interfaces";
 import { randomUUID } from "crypto";
 import { ILoginResponse } from "../../modules/auth/auth.entity";
 
@@ -26,14 +26,10 @@ type signatureType = {
 };
 type decodeType = {
   token: string;
-  tokenType: tokenTypeEnum;
+  tokenType?: TokenTypeEnum;
 };
 
 export class TokenService {
-  static tokenTypeEnum: any;
-  static decodeToken(arg0: { token: any; tokenType: any; }): { user: any; decoded: any; } | PromiseLike<{ user: any; decoded: any; }> {
-    throw new Error("Method not implemented.");
-  }
   private readonly userRepository: UserRepository;
   private readonly redis: RedisService;
 
@@ -86,25 +82,23 @@ export class TokenService {
   };
 
   getSignature = async (
-    tokenType = tokenTypeEnum.ACCESS,
+    tokenType: TokenTypeEnum = TokenTypeEnum.ACCESS,
     signatureLevel: RoleEnum,
   ): Promise<string> => {
     const signatures = await this.detectSignatureLevel(signatureLevel);
-    let signature;
     switch (tokenType) {
-      case tokenTypeEnum.ACCESS:
-        signature = signatures.accessSignature;
-        break;
-      case tokenTypeEnum.REFRESH:
-        signature = signatures.refreshSignature;
-        break;
+      case TokenTypeEnum.ACCESS:
+        return signatures.accessSignature;
+      case TokenTypeEnum.REFRESH:
+        return signatures.refreshSignature;
+      default:
+        throw new BadRequestExaption("Invalid token type");
     }
-    return signature;
   };
 
   decodeToken = async ({
     token,
-    tokenType = tokenTypeEnum.ACCESS,
+    tokenType = TokenTypeEnum.ACCESS,
   }: decodeType): Promise<{
     user: HydratedDocument<IUser>;
     decode: JwtPayload;
@@ -112,21 +106,30 @@ export class TokenService {
     const decoded = jwt.decode(token) as JwtPayload | null;
 
     if (!decoded) {
-      throw new BadRequestException("Invalid token");
+      throw new BadRequestExaption("Invalid token");
     }
 
     if (!Array.isArray(decoded.aud)) {
-      throw new BadRequestException("Invalid token audience format");
+      throw new BadRequestExaption("Invalid token audience format");
     }
 
     const [tokenApproach, signatureLevel] = decoded.aud;
 
     if (tokenApproach === undefined || signatureLevel === undefined) {
-      throw new BadRequestException("Invalid token audience format");
+      throw new BadRequestExaption("Invalid token audience format");
     }
 
-    if (tokenType !== (tokenApproach as unknown as tokenTypeEnum)) {
-      throw new BadRequestException(
+    const parsedTokenType = Number(tokenApproach);
+    if (
+      (parsedTokenType !== TokenTypeEnum.ACCESS &&
+        parsedTokenType !== TokenTypeEnum.REFRESH) ||
+      (signatureLevel !== RoleEnum.ADMIN && signatureLevel !== RoleEnum.USER)
+    ) {
+      throw new BadRequestExaption("Invalid token audience format");
+    }
+
+    if (tokenType !== parsedTokenType) {
+      throw new BadRequestExaption(
         `Invalid token type. Only ${tokenType} allowed for this endpoint`,
       );
     }
@@ -140,18 +143,18 @@ export class TokenService {
         }),
       ))
     ) {
-      throw new UnauthorizedException("Invalid login session");
+      throw new UnauthorizedExeption("Invalid login session");
     }
 
     const secret = await this.getSignature(
-      tokenApproach as unknown as tokenTypeEnum,
-      signatureLevel as RoleEnum,
+      parsedTokenType,
+      signatureLevel,
     );
 
     const verifiedData = jwt.verify(token, secret) as JwtPayload;
 
     if (!verifiedData?.sub) {
-      throw new BadRequestException("Invalid token payload");
+      throw new BadRequestExaption("Invalid token payload");
     }
 
     const user = await this.userRepository.findOne({
@@ -159,7 +162,7 @@ export class TokenService {
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundExeption("User not found");
     }
 
     if (
@@ -167,7 +170,7 @@ export class TokenService {
       verifiedData.iat &&
       user.changeCredentialsTime.getTime() >= verifiedData.iat * 1000
     ) {
-      throw new UnauthorizedException("Invalid login session");
+      throw new UnauthorizedExeption("Invalid login session");
     }
 
     return {
@@ -191,8 +194,8 @@ export class TokenService {
       options: {
         issuer,
         audience: [
-          tokenTypeEnum.ACCESS as unknown as string,
-          user.role as unknown as RoleEnum,
+          TokenTypeEnum.ACCESS.toString(),
+          user.role,
         ],
         expiresIn: ACCESS_EXPIRES_IN,
         jwtid,
@@ -205,8 +208,8 @@ export class TokenService {
       options: {
         issuer,
         audience: [
-          tokenTypeEnum.REFRESH as unknown as string,
-          user.role as unknown as RoleEnum,
+          TokenTypeEnum.REFRESH.toString(),
+          user.role,
         ],
         expiresIn: REFRESH_EXPIRES_IN,
         jwtid,

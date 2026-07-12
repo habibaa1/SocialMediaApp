@@ -3,8 +3,8 @@ import multer, { FileFilterCallback } from "multer";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { StorageApproachEnum } from "../../Enums";
-import { BadRequestException } from "../../exceptions";
+import { StorageApproachEnum } from "../../enums";
+import { BadRequestExaption } from "../../exception";
 
 
 export const fileValidation = {
@@ -26,7 +26,7 @@ export const fileFilter = (validation: string[]) => {
   ) => {
     if (validation.length && !validation.includes(file.mimetype)) {
       return callback(
-        new BadRequestException(
+        new BadRequestExaption(
           `Invalid file format. Allowed types: ${validation.join(", ")}`
         )
       );

@@ -8,118 +8,134 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const config_1 = require("../../config/config");
 const enums_1 = require("../enums");
 const exception_1 = require("../exception");
-const user_reposatory_1 = require("../../DB/repository/user.reposatory");
 const redis_service_1 = require("./redis.service");
-const model_1 = require("../../DB/model");
-const node_crypto_1 = require("node:crypto");
+const repository_1 = require("../../DB/repository");
+const crypto_1 = require("crypto");
 class TokenService {
     userRepository;
     redis;
     constructor() {
-        this.userRepository = new user_reposatory_1.UserRepository(model_1.UserModel);
+        this.userRepository = new repository_1.UserRepository();
         this.redis = redis_service_1.redisService;
     }
-    sign = async ({ payload, secret = config_1.USER_ACCESS_TOKEN_SIGNATURE, options }) => {
+    sign = async ({ payload, secret = config_1.User_TOKEN_SECRET_KEY, options, }) => {
         return jsonwebtoken_1.default.sign(payload, secret, options);
     };
-    verify = async ({ token, secret = config_1.USER_ACCESS_TOKEN_SIGNATURE, options }) => {
+    verify = async ({ token, secret = config_1.User_TOKEN_SECRET_KEY, options, }) => {
         return jsonwebtoken_1.default.verify(token, secret);
     };
     detectSignatureLevel = async (role) => {
-        let signatures;
+        let signatureLevel;
         switch (role) {
             case enums_1.RoleEnum.ADMIN:
-                signatures = {
-                    accessSignature: config_1.SYSTEM_ACCESS_TOKEN_SIGNATURE,
-                    refreshSignature: config_1.SYSTEM_REFRESH_TOKEN_SIGNATURE,
+                signatureLevel = {
+                    accessSignature: config_1.System_TOKEN_SECRET_KEY,
+                    refreshSignature: config_1.System_REFRESH_TOKEN_SECRET_KEY,
                 };
                 break;
             default:
-                signatures = {
-                    accessSignature: config_1.USER_ACCESS_TOKEN_SIGNATURE,
-                    refreshSignature: config_1.USER_REFRESH_TOKEN_SIGNATURE,
+                signatureLevel = {
+                    accessSignature: config_1.User_TOKEN_SECRET_KEY,
+                    refreshSignature: config_1.User_REFRESH_TOKEN_SECRET_KEY,
                 };
                 break;
         }
-        return signatures;
+        return signatureLevel;
     };
     getSignature = async (tokenType = enums_1.TokenTypeEnum.ACCESS, signatureLevel) => {
         const signatures = await this.detectSignatureLevel(signatureLevel);
-        let signature;
         switch (tokenType) {
+            case enums_1.TokenTypeEnum.ACCESS:
+                return signatures.accessSignature;
             case enums_1.TokenTypeEnum.REFRESH:
-                signature = signatures.refreshSignature;
-                break;
+                return signatures.refreshSignature;
             default:
-                signature = signatures.accessSignature;
-                break;
+                throw new exception_1.BadRequestExaption("Invalid token type");
         }
-        return signature;
     };
-    decodeToken = async ({ token, tokenType = enums_1.TokenTypeEnum.ACCESS }) => {
+    decodeToken = async ({ token, tokenType = enums_1.TokenTypeEnum.ACCESS, }) => {
         const decoded = jsonwebtoken_1.default.decode(token);
-        console.log({ decoded });
-        if (!decoded?.aud?.length) {
-            throw new exception_1.BadRequestExaption("Missing token audience");
+        if (!decoded) {
+            throw new exception_1.BadRequestExaption("Invalid token");
+        }
+        if (!Array.isArray(decoded.aud)) {
+            throw new exception_1.BadRequestExaption("Invalid token audience format");
         }
         const [tokenApproach, signatureLevel] = decoded.aud;
-        console.log({ tokenApproach, signatureLevel });
-        if (tokenApproach == undefined || signatureLevel == undefined) {
-            throw new exception_1.BadRequestExaption(`missing token audians`);
+        if (tokenApproach === undefined || signatureLevel === undefined) {
+            throw new exception_1.BadRequestExaption("Invalid token audience format");
         }
-        if (tokenType != tokenApproach) {
-            throw new exception_1.BadRequestExaption(`Invalid token approach only ${tokenType} allowed for this endpoint`);
+        const parsedTokenType = Number(tokenApproach);
+        if ((parsedTokenType !== enums_1.TokenTypeEnum.ACCESS &&
+            parsedTokenType !== enums_1.TokenTypeEnum.REFRESH) ||
+            (signatureLevel !== enums_1.RoleEnum.ADMIN && signatureLevel !== enums_1.RoleEnum.USER)) {
+            throw new exception_1.BadRequestExaption("Invalid token audience format");
         }
-        if (decoded.jti && await this.redis.get(this.redis.revokeTokenKey({ userId: decoded.sub, jti: decoded.jti }))) {
-            throw new exception_1.UnauthorizedExeption("invaled login session");
+        if (tokenType !== parsedTokenType) {
+            throw new exception_1.BadRequestExaption(`Invalid token type. Only ${tokenType} allowed for this endpoint`);
         }
-        const secret = await this.getSignature(tokenApproach, signatureLevel);
-        console.log({ secret });
-        const verifiedData = await this.verify({ token, secret });
+        if (decoded.jti &&
+            (await this.redis.get(this.redis.revokeTokenKey({
+                userId: decoded.sub,
+                jti: decoded.jti,
+            })))) {
+            throw new exception_1.UnauthorizedExeption("Invalid login session");
+        }
+        const secret = await this.getSignature(parsedTokenType, signatureLevel);
+        const verifiedData = jsonwebtoken_1.default.verify(token, secret);
         if (!verifiedData?.sub) {
             throw new exception_1.BadRequestExaption("Invalid token payload");
         }
         const user = await this.userRepository.findOne({
-            filter: {
-                _id: verifiedData.sub
-            }
+            filter: { _id: verifiedData.sub },
         });
         if (!user) {
-            throw new exception_1.NotFoundExeption("Not register account");
+            throw new exception_1.NotFoundExeption("User not found");
         }
-        if (user.changeCredentialsTime && user.changeCredentialsTime?.getTime() >= (decoded.iat || 0) * 1000) {
+        if (user.changeCredentialsTime &&
+            verifiedData.iat &&
+            user.changeCredentialsTime.getTime() >= verifiedData.iat * 1000) {
             throw new exception_1.UnauthorizedExeption("Invalid login session");
         }
-        return { user, decoded };
+        return {
+            user: user,
+            decode: verifiedData,
+        };
     };
     createLoginCredentials = async (user, issuer) => {
         const { accessSignature, refreshSignature } = await this.detectSignatureLevel(user.role);
-        const jwtid = (0, node_crypto_1.randomUUID)();
-        const access_token = await this.sign({
+        const jwtid = (0, crypto_1.randomUUID)();
+        const Access_Token = await this.sign({
             payload: { sub: user._id },
             secret: accessSignature,
             options: {
                 issuer,
-                audience: [enums_1.TokenTypeEnum.ACCESS, user.role],
-                expiresIn: config_1.ACCESS_TOKEN_EXPIRES_IN,
-                jwtid
-            }
+                audience: [
+                    enums_1.TokenTypeEnum.ACCESS.toString(),
+                    user.role,
+                ],
+                expiresIn: config_1.ACCESS_EXPIRES_IN,
+                jwtid,
+            },
         });
-        const refresh_token = await this.sign({
+        const Refresh_Token = await this.sign({
             payload: { sub: user._id },
             secret: refreshSignature,
             options: {
                 issuer,
-                audience: [enums_1.TokenTypeEnum.REFRESH, user.role],
-                expiresIn: config_1.REFRESH_TOKEN_EXPIRES_IN,
-                jwtid
-            }
+                audience: [
+                    enums_1.TokenTypeEnum.REFRESH.toString(),
+                    user.role,
+                ],
+                expiresIn: config_1.REFRESH_EXPIRES_IN,
+                jwtid,
+            },
         });
-        return { access_token, refresh_token };
+        return { Access_Token, Refresh_Token };
     };
     createRevokeToken = async ({ userId, jti, ttl }) => {
         await this.redis.set({
-            key: this.redis.revokeTokenKey({ userId, jti }),
+            key: this.redis.revokeTokenKey({ userId: userId.toString(), jti }),
             value: jti,
             ttl
         });

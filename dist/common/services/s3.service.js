@@ -1,142 +1,123 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.s3Service = exports.S3Service = void 0;
+exports.s3Service = exports.S3Service = exports.writePipeLine = void 0;
 const client_s3_1 = require("@aws-sdk/client-s3");
-const config_1 = require("../../config/config");
-const exception_1 = require("../exception");
-const crypto_1 = require("crypto");
-const enums_1 = require("../enums");
-const fs_1 = require("fs");
 const lib_storage_1 = require("@aws-sdk/lib-storage");
 const s3_request_presigner_1 = require("@aws-sdk/s3-request-presigner");
+const crypto_1 = require("crypto");
+const fs_1 = require("fs");
+const node_util_1 = require("node:util");
+const node_stream_1 = require("node:stream");
+const config_1 = require("../../config/config");
+const enums_1 = require("../enums");
+const exception_1 = require("../exception");
+exports.writePipeLine = (0, node_util_1.promisify)(node_stream_1.pipeline);
 class S3Service {
     client;
     constructor() {
         this.client = new client_s3_1.S3Client({
-            region: config_1.AWS_REGION,
+            region: config_1.S3_REGION,
             credentials: {
-                accessKeyId: config_1.AWS_ACCESS_KEY_ID,
-                secretAccessKey: config_1.AWS_SECRET_ACCESS_KEY
-            }
+                accessKeyId: config_1.S3_ACCESS_KEY_ID,
+                secretAccessKey: config_1.S3_ACCESS_SECRET_KEY,
+            },
         });
     }
-    async uploadAsset({ storageApproach = enums_1.StorageApproachEnum.MEMORY, Bucket = config_1.AWS_BUCKET_NAME, path = "general", file, ACL = client_s3_1.ObjectCannedACL.private, ContentType }) {
+    async uploadFile(file, path, ContentType) {
         const command = new client_s3_1.PutObjectCommand({
-            Bucket,
+            Bucket: config_1.S3_BUCKET_NAME,
             Key: `${config_1.APPLICATION_NAME}/${path}/${(0, crypto_1.randomUUID)()}__${file.originalname}`,
-            ACL,
-            Body: storageApproach === enums_1.StorageApproachEnum.MEMORY ? file.buffer : (0, fs_1.createReadStream)(file.path),
-            ContentType: file.mimetype || ContentType
+            ACL: client_s3_1.ObjectCannedACL.private,
+            Body: file.buffer,
+            ContentType: file.mimetype || ContentType,
         });
-        if (!command.input?.Key) {
-            throw new exception_1.BadRequestExaption("Fail to upload this asset");
-        }
         await this.client.send(command);
-        return command.input?.Key;
+        if (!command.input.Key) {
+            throw new exception_1.BadRequestExaption("Fail to upload this file");
+        }
+        return command.input.Key;
     }
-    async uploadLargeAsset({ storageApproach = enums_1.StorageApproachEnum.DISK, Bucket = config_1.AWS_BUCKET_NAME, path = "general", file, ACL = client_s3_1.ObjectCannedACL.private, ContentType, partSize = 5 }) {
-        const uploadFile = new lib_storage_1.Upload({
+    async uploadLargeFile({ storageApproach = enums_1.StorageApproachEnum.DISK, Bucket = config_1.S3_BUCKET_NAME, path = "general", ACL = client_s3_1.ObjectCannedACL.private, file, ContentType, }) {
+        const upload = new lib_storage_1.Upload({
             client: this.client,
             params: {
                 Bucket,
-                Key: `${config_1.APPLICATION_NAME}/${path}/${(0, crypto_1.randomUUID)()}__${file.originalname}`,
+                Key: `${config_1.APPLICATION_NAME}/${path}/${(0, crypto_1.randomUUID)()}_${file.originalname}`,
                 ACL,
-                Body: storageApproach === enums_1.StorageApproachEnum.MEMORY ? file.buffer : (0, fs_1.createReadStream)(file.path),
-                ContentType: file.mimetype || ContentType
+                Body: storageApproach === enums_1.StorageApproachEnum.MEMORY
+                    ? file.buffer
+                    : (0, fs_1.createReadStream)(file.path),
+                ContentType: file.mimetype || ContentType,
             },
-            partSize: partSize * 1024 * 1024,
         });
-        uploadFile.on("httpUploadProgress", (progress) => {
-            console.log(progress);
-            console.log(`File Upload is ${(progress.loaded / progress.total) * 100} %`);
+        upload.on("httpUploadProgress", (progress) => {
+            console.log(`Uploaded file progress: ${progress.loaded}/${progress.total} bytes`);
         });
-        return await uploadFile.done();
-    }
-    async uploadAssets({ storageApproach = enums_1.StorageApproachEnum.MEMORY, uploadApproach = enums_1.UploadApproachEnum.SMALL, Bucket = config_1.AWS_BUCKET_NAME, path = "general", files, ACL = client_s3_1.ObjectCannedACL.private, ContentType }) {
-        let urls = [];
-        if (uploadApproach === enums_1.UploadApproachEnum.LARGE) {
-            const data = await Promise.all(files.map((file) => {
-                return this.uploadLargeAsset({
-                    storageApproach,
-                    file,
-                    ACL,
-                    Bucket,
-                    ContentType,
-                    path
-                });
-            }));
-            urls = data.map((ele) => ele.Key);
+        const result = await upload.done();
+        if (!result.Key) {
+            throw new exception_1.BadRequestExaption("Fail to upload large file");
         }
-        else {
-            urls = await Promise.all(files.map((file) => {
-                return this.uploadAsset({
-                    storageApproach,
-                    file,
-                    ACL,
-                    Bucket,
-                    ContentType,
-                    path
-                });
-            }));
-        }
-        return urls;
+        return result.Key;
     }
-    async CreatePreSignedUploadLink({ Bucket = config_1.AWS_BUCKET_NAME, path = "general", ContentType, OriginalName, expiresIn = config_1.AWS_EXPIRES_IN }) {
-        const command = new client_s3_1.PutObjectCommand({
+    async uploadFiles({ storageApproach = enums_1.StorageApproachEnum.MEMORY, uploadApproach = enums_1.UploadApproachEnum.LARGE, Bucket = config_1.S3_BUCKET_NAME, path = "general", ACL = client_s3_1.ObjectCannedACL.private, files, }) {
+        const uploadFn = uploadApproach === enums_1.UploadApproachEnum.LARGE
+            ? (f) => this.uploadLargeFile({
+                storageApproach,
+                Bucket,
+                path,
+                ACL,
+                file: f,
+            })
+            : (f) => this.uploadFile(f, path);
+        return Promise.all(files.map(uploadFn));
+    }
+    async getFile({ Bucket = config_1.S3_BUCKET_NAME, Key, }) {
+        const command = new client_s3_1.GetObjectCommand({ Bucket, Key });
+        return this.client.send(command);
+    }
+    async listFiles({ Bucket = config_1.S3_BUCKET_NAME, folderKey, }) {
+        const command = new client_s3_1.ListObjectsV2Command({
             Bucket,
-            Key: `${config_1.APPLICATION_NAME}/${path}/${(0, crypto_1.randomUUID)()}__${OriginalName}`,
-            ContentType
+            Prefix: `${config_1.APPLICATION_NAME}/${folderKey}`,
         });
-        if (!command.input?.Key) {
-            throw new exception_1.BadRequestExaption("Fail to upload this asset");
-        }
-        const url = await (0, s3_request_presigner_1.getSignedUrl)(this.client, command, { expiresIn });
-        return { url, key: command.input.Key };
+        const objectList = await this.client.send(command);
+        return objectList;
     }
-    async CreatePreSignedFetchLink({ Bucket = config_1.AWS_BUCKET_NAME, Key, expiresIn = config_1.AWS_EXPIRES_IN, fileName, download }) {
-        const command = new client_s3_1.GetObjectCommand({
-            Bucket,
-            Key,
-            ResponseContentDisposition: download === "true" ? `attachment; filename="${fileName || Key.split("/").pop()}"` : undefined,
-        });
-        const url = await (0, s3_request_presigner_1.getSignedUrl)(this.client, command, { expiresIn });
-        return url;
+    async deleteFile({ Bucket = config_1.S3_BUCKET_NAME, Key, }) {
+        const command = new client_s3_1.DeleteObjectCommand({ Bucket, Key });
+        return this.client.send(command);
     }
-    async getAsset({ Bucket = config_1.AWS_BUCKET_NAME, Key }) {
-        const command = new client_s3_1.GetObjectCommand({
-            Bucket,
-            Key
-        });
-        return await this.client.send(command);
-    }
-    async deleteAsset({ Bucket = config_1.AWS_BUCKET_NAME, Key }) {
-        const command = new client_s3_1.DeleteObjectCommand({
-            Bucket,
-            Key,
-        });
-        return await this.client.send(command);
-    }
-    async deleteAssets({ Bucket = config_1.AWS_BUCKET_NAME, Keys }) {
+    async deleteFiles({ Bucket = config_1.S3_BUCKET_NAME, keysToDelete, Quiet = false, }) {
         const command = new client_s3_1.DeleteObjectsCommand({
             Bucket,
             Delete: {
-                Objects: Keys,
-                Quiet: false
-            }
+                Objects: keysToDelete.map((Key) => ({ Key })),
+                Quiet,
+            },
         });
-        return await this.client.send(command);
+        return this.client.send(command);
     }
-    async listFolderDir({ Bucket = config_1.AWS_BUCKET_NAME, prefix }) {
-        const command = new client_s3_1.ListObjectsV2Command({
+    async deleteFolderContent({ Bucket = config_1.S3_BUCKET_NAME, Quiet = false, folderKey, }) {
+        const objects = await this.listFiles({ Bucket, folderKey });
+        if (!objects.Contents?.length) {
+            throw new exception_1.BadRequestExaption(`No objects found under folder: ${folderKey}`);
+        }
+        const keysToDelete = objects.Contents.map((obj) => obj.Key);
+        return this.deleteFiles({ Bucket, keysToDelete, Quiet });
+    }
+    async createPreSignedUploadLink({ expiresIn = config_1.S3_EXPIRES_IN, Bucket = config_1.S3_BUCKET_NAME, path = "general", ContentType, originalname, }) {
+        const Key = `${config_1.APPLICATION_NAME}/${path}/${(0, crypto_1.randomUUID)()}_${originalname}`;
+        const command = new client_s3_1.PutObjectCommand({ Bucket, Key, ContentType });
+        const url = await (0, s3_request_presigner_1.getSignedUrl)(this.client, command, { expiresIn });
+        return { url, Key };
+    }
+    async createPreSignedDownloadLink({ Bucket = config_1.S3_BUCKET_NAME, Key, expiresIn = 60, downloadName, }) {
+        const command = new client_s3_1.GetObjectCommand({
             Bucket,
-            Prefix: `${config_1.APPLICATION_NAME}/${prefix}`,
+            Key,
+            ResponseContentDisposition: `attachment; filename="${downloadName || Key.split("/").pop()}"`,
         });
-        return await this.client.send(command);
-    }
-    async deleteFolderByPrefix({ Bucket = config_1.AWS_BUCKET_NAME, prefix }) {
-        const result = await this.listFolderDir({ Bucket, prefix });
-        const Keys = result.Contents?.map(ele => { return { Key: ele.Key }; });
-        return await this.deleteAssets({ Bucket, Keys });
+        return (0, s3_request_presigner_1.getSignedUrl)(this.client, command, { expiresIn });
     }
 }
 exports.S3Service = S3Service;

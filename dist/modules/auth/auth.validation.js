@@ -1,43 +1,46 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resetForgotPassword = exports.signup = exports.login = exports.ConfirmEmail = exports.resendConfirmEmail = void 0;
+exports.resetPasswordSchema = exports.forgotPasswordSchema = exports.signupSchema = exports.loginSchema = exports.confirmEmailSchema = exports.reSendConfirmEmailSchema = void 0;
 const zod_1 = require("zod");
 const validation_1 = require("../../common/validation");
-exports.resendConfirmEmail = {
+exports.reSendConfirmEmailSchema = {
     body: zod_1.z.strictObject({
         email: validation_1.generalValidationFields.email,
-    })
+    }),
 };
-exports.ConfirmEmail = {
-    body: exports.resendConfirmEmail.body.safeExtend({
+exports.confirmEmailSchema = {
+    body: exports.reSendConfirmEmailSchema.body.safeExtend({
         otp: validation_1.generalValidationFields.otp,
-    })
+    }),
 };
-exports.login = {
-    body: exports.resendConfirmEmail.body.safeExtend({
+exports.loginSchema = {
+    body: exports.reSendConfirmEmailSchema.body.safeExtend({
         password: validation_1.generalValidationFields.password,
         FCM: zod_1.z.string().optional()
-    })
+    }),
 };
-exports.signup = {
-    body: exports.login.body.safeExtend({
+exports.signupSchema = {
+    body: exports.loginSchema.body.safeExtend({
         username: validation_1.generalValidationFields.username,
+        confirmPassword: validation_1.generalValidationFields.confirmPassword,
         phone: validation_1.generalValidationFields.phone.optional(),
-        confirmPassword: validation_1.generalValidationFields.confirmPassword
-    }).refine((data) => {
-        return data.password === data.confirmPassword;
-    }, { message: "password and confirm password must be the same", })
-};
-exports.resetForgotPassword = {
-    body: zod_1.z.strictObject({
-        email: validation_1.generalValidationFields.email,
-        otp: validation_1.generalValidationFields.otp,
-        password: validation_1.generalValidationFields.password,
-        confirmPassword: validation_1.generalValidationFields.confirmPassword
     }).refine((data) => {
         return data.password === data.confirmPassword;
     }, {
-        message: "password and confirm password must be the same",
-        path: ["confirmPassword"]
-    })
+        error: "password mismatch with confirm password",
+    }),
+};
+exports.forgotPasswordSchema = {
+    body: zod_1.z.strictObject({
+        email: validation_1.generalValidationFields.email,
+    }),
+};
+exports.resetPasswordSchema = {
+    body: exports.forgotPasswordSchema.body.safeExtend({
+        otp: validation_1.generalValidationFields.otp,
+        password: validation_1.generalValidationFields.password,
+        confirmPassword: validation_1.generalValidationFields.confirmPassword,
+    }).refine((data) => data.password === data.confirmPassword, {
+        error: "password mismatch with confirm password",
+    }),
 };

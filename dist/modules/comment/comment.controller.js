@@ -32,20 +32,98 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const middleware_1 = require("../middleware");
+const middleware_1 = require("../../middleware");
 const response_1 = require("../../common/response");
-const multer_1 = require("../../common/utils/multer");
+const comment_service_1 = __importDefault(require("./comment.service"));
 const validators = __importStar(require("./comment.validation"));
-const comment_service_1 = require("./comment.service");
-const router = (0, express_1.Router)({ mergeParams: true });
-router.post("/", (0, middleware_1.authentication)(), (0, multer_1.cloudFileUplad)({ validation: multer_1.fileFieldValidation.image }).array("attachments", 2), (0, middleware_1.validation)(validators.createComment), async (req, res, next) => {
-    const data = await comment_service_1.commentService.createComment(req.params, { ...req.body, files: req.files }, req.user);
-    return (0, response_1.successResponse)({ res, status: 201, data });
+const router = (0, express_1.Router)();
+router.post("/", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.createCommentSchema), async (req, res, next) => {
+    try {
+        const data = await comment_service_1.default.createComment(req.body, req.user);
+        return (0, response_1.successResponse)({
+            res,
+            status: 201,
+            message: "Comment created successfully",
+            data,
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
 });
-router.post("/:commentId/reply", (0, middleware_1.authentication)(), (0, multer_1.cloudFileUplad)({ validation: multer_1.fileFieldValidation.image }).array("attachments", 2), (0, middleware_1.validation)(validators.replyOnComment), async (req, res, next) => {
-    const data = await comment_service_1.commentService.replyOnComment(req.params, { ...req.body, files: req.files }, req.user);
-    return (0, response_1.successResponse)({ res, status: 201, data });
+router.get("/post/:postId", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.listPostCommentsSchema), async (req, res, next) => {
+    try {
+        const data = await comment_service_1.default.listPostComments(String(req.params.postId));
+        return (0, response_1.successResponse)({ res, data });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.get("/:id", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.getCommentSchema), async (req, res, next) => {
+    try {
+        const data = await comment_service_1.default.getCommentById(String(req.params.id));
+        return (0, response_1.successResponse)({ res, data });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.patch("/:id", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.updateCommentSchema), async (req, res, next) => {
+    try {
+        const data = await comment_service_1.default.updateComment(String(req.params.id), req.body, req.user);
+        return (0, response_1.successResponse)({
+            res,
+            message: "Comment updated successfully",
+            data,
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.delete("/:id", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.deleteCommentSchema), async (req, res, next) => {
+    try {
+        await comment_service_1.default.deleteComment(String(req.params.id), req.user);
+        return (0, response_1.successResponse)({
+            res,
+            message: "Comment deleted successfully",
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.post("/:id/react", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.reactCommentSchema), async (req, res, next) => {
+    try {
+        const data = await comment_service_1.default.reaction(String(req.params.id), req.body, req.user);
+        return (0, response_1.successResponse)({
+            res,
+            message: "Comment reaction updated",
+            data,
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.post("/:id/reply", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.replyCommentSchema), async (req, res, next) => {
+    try {
+        const data = await comment_service_1.default.replyToComment(String(req.params.id), req.body, req.user);
+        return (0, response_1.successResponse)({
+            res,
+            status: 201,
+            message: "Reply created successfully",
+            data,
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
 });
 exports.default = router;

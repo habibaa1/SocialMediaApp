@@ -1,11 +1,11 @@
 import { HydratedDocument, PopulateOptions, Types } from "mongoose";
-import { IPost, IUser } from "../../common/interface";
-import { AvailabilityEnum } from "../../common/Enums";
+import { IPost, IUser } from "../../common/interfaces";
+import { AvailabilityEnum } from "../../common/enums";
 import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from "../../common/exceptions";
+  BadRequestExaption,
+  ForbiddenExeption,
+  NotFoundExeption,
+} from "../../common/exception";
 import {
   CommentRepository,
   NotificationRepository,
@@ -128,8 +128,8 @@ export class PostService {
   }
 
   async getPostById(id: string): Promise<IPost> {
-    const post = await this.postRepository.findById({
-      id,
+    const post = await this.postRepository.findbyId({
+      _id: new Types.ObjectId(id),
       options: {
         populate: [
           { path: "createdBy", select: "firstName lastName profilePicture" },
@@ -140,11 +140,10 @@ export class PostService {
     });
 
     if (!post || (post as any).deletedAt) {
-      throw new NotFoundException("Post not found");
+      throw new NotFoundExeption("Post not found");
     }
 
-    return post as IPost;
-  }
+return post as unknown as IPost;  }
 
   async updatePost(
     id: string,
@@ -152,21 +151,21 @@ export class PostService {
     user: HydratedDocument<IUser>,
   ): Promise<IPost> {
     if (Object.keys(data).length === 0) {
-      throw new BadRequestException("No data provided to update");
+      throw new BadRequestExaption("No data provided to update");
     }
 
-    const post = await this.postRepository.findById({ id });
+    const post = await this.postRepository.findbyId({ _id: new Types.ObjectId(id) });
 
     if (!post || (post as any).deletedAt) {
-      throw new NotFoundException("Post not found");
+      throw new NotFoundExeption("Post not found");
     }
 
-    const ownerId = (post.createdBy as any).toString();
+const ownerId = (post as any).createdBy?.toString();
     if (ownerId !== user._id.toString()) {
-      throw new ForbiddenException("You are not allowed to update this post");
+      throw new ForbiddenExeption("You are not allowed to update this post");
     }
 
-    const updated = await this.postRepository.updateOne({
+    const updated = await this.postRepository.findOneAndUpdate({
       filter: { _id: id },
       update: {
         ...data,
@@ -175,46 +174,45 @@ export class PostService {
     });
 
     if (!updated) {
-      throw new NotFoundException("Failed to update post");
+      throw new NotFoundExeption("Failed to update post");
     }
 
     return updated as IPost;
   }
 
   async deletePost(id: string, user: HydratedDocument<IUser>): Promise<IPost> {
-    const post = await this.postRepository.findById({ id });
+    const post = await this.postRepository.findbyId({ _id: new Types.ObjectId(id) });
 
     if (!post || (post as any).deletedAt) {
-      throw new NotFoundException("Post not found");
+      throw new NotFoundExeption("Post not found");
     }
 
-    const ownerId = (post.createdBy as any).toString();
+const ownerId = (post as any).createdBy?.toString();
     if (ownerId !== user._id.toString()) {
-      throw new ForbiddenException("You are not allowed to delete this post");
+      throw new ForbiddenExeption("You are not allowed to delete this post");
     }
 
-    const deleted = await this.postRepository.updateOne({
+    const deleted = await this.postRepository.findOneAndUpdate({
       filter: { _id: id },
       update: { deletedAt: new Date() },
     });
 
     if (!deleted) {
-      throw new NotFoundException("Failed to delete post");
+      throw new NotFoundExeption("Failed to delete post");
     }
 
     return deleted as IPost;
   }
 
   async Like(id: string, user: HydratedDocument<IUser>): Promise<IPost> {
-    const post = await this.postRepository.findById({ id });
+    const post = await this.postRepository.findbyId({ _id: new Types.ObjectId(id) });
 
     if (!post || (post as any).deletedAt) {
-      throw new NotFoundException("Post not found");
+      throw new NotFoundExeption("Post not found");
     }
 
     const userId = user._id.toString();
-    const likes = ((post.likes || []) as Types.ObjectId[]).map((like) =>
-      like.toString(),
+const likes = (((post as any).likes || []) as Types.ObjectId[]).map((like) =>      like.toString(),
     );
 
     const liked = likes.includes(userId);
@@ -222,7 +220,7 @@ export class PostService {
       ? likes.filter((like) => like !== userId)
       : [...likes, userId].map((value) => new Types.ObjectId(value));
 
-    const updated = await this.postRepository.updateOne({
+    const updated = await this.postRepository.findOneAndUpdate({
       filter: { _id: id },
       update: {
         likes: updatedLikes,
@@ -230,7 +228,7 @@ export class PostService {
     });
 
     if (!updated) {
-      throw new NotFoundException("Failed to update likes");
+      throw new NotFoundExeption("Failed to update likes");
     }
 
     return updated as IPost;
@@ -241,13 +239,13 @@ export class PostService {
     emoji: string,
     user: HydratedDocument<IUser>,
   ): Promise<IPost> {
-    const post = await this.postRepository.findById({ id });
+    const post = await this.postRepository.findbyId({ _id: new Types.ObjectId(id) });
     if (!post || (post as any).deletedAt) {
-      throw new NotFoundException("Post not found");
+      throw new NotFoundExeption("Post not found");
     }
 
-    const existingReactions = (post.reactions || []) as Array<{
-      emoji: string;
+const existingReactions = ((post as any).reactions || []) as Array<{
+        emoji: string;
       userId: Types.ObjectId;
     }>;
 
@@ -265,13 +263,13 @@ export class PostService {
       updatedReactions.push({ emoji, userId: user._id as Types.ObjectId });
     }
 
-    const updated = await this.postRepository.updateOne({
+    const updated = await this.postRepository.findOneAndUpdate({
       filter: { _id: id },
       update: { reactions: updatedReactions },
     });
 
     if (!updated) {
-      throw new NotFoundException("Failed to update reaction");
+      throw new NotFoundExeption("Failed to update reaction");
     }
 
     return updated as IPost;
@@ -280,29 +278,24 @@ export class PostService {
   async dashboard(
     user: HydratedDocument<IUser>,
   ): Promise<Record<string, number>> {
-    const postCount = await this.postRepository.countDocuments({
-      filter: { createdBy: user._id, deletedAt: null },
-    });
-    const commentCount = await this.commentRepository.countDocuments({
-      filter: { createdBy: user._id, deletedAt: null },
-    });
-    const unreadNotifications =
-      await this.notificationRepository.countDocuments({
+    const [posts, comments, notifications, stories] = await Promise.all([
+      this.postRepository.find({ filter: { createdBy: user._id, deletedAt: null } }),
+      this.commentRepository.find({ filter: { createdBy: user._id, deletedAt: null } }),
+      this.notificationRepository.find({
         filter: { recipientId: user._id, isRead: false, deletedAt: null },
-      });
-    const activeStories = await this.storyRepository.countDocuments({
-      filter: { createdBy: user._id, deletedAt: null },
-    });
+      }),
+      this.storyRepository.find({ filter: { createdBy: user._id, deletedAt: null } }),
+    ]);
 
     return {
-      postCount,
-      commentCount,
-      unreadNotifications,
-      activeStories,
+      postCount: posts.length,
+      commentCount: comments.length,
+      unreadNotifications: notifications.length,
+      activeStories: stories.length,
     };
   }
   reactPost = async (args: ReactOnPostArgsDto, user: IAuthUser["user"]) => {
-    const updatedPost = await this.postRepository.updateOne({
+    const updatedPost = await this.postRepository.findOneAndUpdate({
       filter: { _id: args.postID },
       update: {
         $push: {
@@ -310,13 +303,12 @@ export class PostService {
             emoji: args.react,
             userId: user._id,
           },
-          populate: this.populate,
         },
       },
     });
 
     if (!updatedPost) {
-      throw new BadRequestException("Failed to react to post");
+      throw new BadRequestExaption("Failed to react to post");
     }
 
     return updatedPost;

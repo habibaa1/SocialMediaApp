@@ -18,3 +18,6 @@ __exportStar(require("./user.reposatory"), exports);
 __exportStar(require("./post.reposatory"), exports);
 __exportStar(require("./base.reposatory"), exports);
 __exportStar(require("./comment.reposatory"), exports);
+__exportStar(require("./notification.repository"), exports);
+__exportStar(require("./story.repository"), exports);
+__exportStar(require("./chat.repository"), exports);

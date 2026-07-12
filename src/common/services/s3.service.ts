@@ -24,8 +24,8 @@ import {
   S3_EXPIRES_IN,
   S3_REGION,
 } from "../../config/config";
-import { StorageApproachEnum, UploadApproachEnum } from "../Enums";
-import { BadRequestException } from "../exceptions";
+import { StorageApproachEnum, UploadApproachEnum } from "../enums";
+import { BadRequestExaption } from "../exception";
 
 export const writePipeLine = promisify(pipeline);
 
@@ -58,7 +58,7 @@ export class S3Service {
     await this.client.send(command);
 
     if (!command.input.Key) {
-      throw new BadRequestException("Fail to upload this file");
+      throw new BadRequestExaption("Fail to upload this file");
     }
 
     return command.input.Key as string;
@@ -102,7 +102,7 @@ export class S3Service {
     const result = await upload.done();
 
     if (!result.Key) {
-      throw new BadRequestException("Fail to upload large file");
+      throw new BadRequestExaption("Fail to upload large file");
     }
 
     return result.Key;
@@ -208,7 +208,7 @@ export class S3Service {
     const objects = await this.listFiles({ Bucket, folderKey });
 
     if (!objects.Contents?.length) {
-      throw new BadRequestException(
+      throw new BadRequestExaption(
         `No objects found under folder: ${folderKey}`,
       );
     }

@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { generalValidation } from "../../common/validation";
+import { generalValidationFields } from "../../common/validation";
 import {
   NotificationAudienceEnum,
   NotificationTypeEnum,
-} from "../../common/Enums";
+} from "../../common/enums";
 
 export const createNotificationSchema = {
   body: z
@@ -11,7 +11,7 @@ export const createNotificationSchema = {
       title: z.string().min(1),
       message: z.string().min(1),
       audience: z.nativeEnum(NotificationAudienceEnum).optional(),
-      recipientId: generalValidation.id.optional(),
+      recipientId: generalValidationFields.id.optional(),
       type: z.nativeEnum(NotificationTypeEnum).optional(),
     })
     .refine(
@@ -25,7 +25,7 @@ export const createNotificationSchema = {
 };
 
 export const updateNotificationSchema = {
-  params: z.strictObject({ id: generalValidation.id }),
+  params: z.strictObject({ id: generalValidationFields.id }),
   body: z
     .strictObject({
       title: z.string().min(1).optional(),
@@ -38,11 +38,11 @@ export const updateNotificationSchema = {
 };
 
 export const getNotificationSchema = {
-  params: z.strictObject({ id: generalValidation.id }),
+  params: z.strictObject({ id: generalValidationFields.id }),
 };
 
 export const markReadSchema = {
-  params: z.strictObject({ id: generalValidation.id }),
+  params: z.strictObject({ id: generalValidationFields.id }),
 };
 
 export const deleteNotificationSchema = getNotificationSchema;

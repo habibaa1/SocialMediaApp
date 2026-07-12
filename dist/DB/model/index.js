@@ -17,3 +17,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 __exportStar(require("./user.model"), exports);
 __exportStar(require("./post.model"), exports);
 __exportStar(require("./comment.model"), exports);
+__exportStar(require("./chat.model"), exports);
+__exportStar(require("./notification.model"), exports);
+__exportStar(require("./story.model"), exports);

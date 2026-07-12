@@ -32,31 +32,135 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const middleware_1 = require("../middleware");
+const middleware_1 = require("../../middleware");
 const response_1 = require("../../common/response");
-const multer_1 = require("../../common/utils/multer");
+const post_service_1 = __importDefault(require("./post.service"));
 const validators = __importStar(require("./post.validation"));
-const post_service_1 = require("./post.service");
-const validation_1 = require("../../common/validation");
-const comment_1 = require("../comment");
 const router = (0, express_1.Router)();
-router.use("/:postId/comment", comment_1.CommentRouter);
-router.get("/", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validation_1.paginationValidationSchema), async (req, res, next) => {
-    const data = await post_service_1.postService.postList(req.query, req.user);
-    return (0, response_1.successResponse)({ res, status: 200, data });
+router.post("/", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.createPostSchema), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.createPost(req.body, req.user);
+        return (0, response_1.successResponse)({
+            res,
+            status: 201,
+            message: "Post created successfully",
+            data,
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
 });
-router.post("/", (0, middleware_1.authentication)(), (0, multer_1.cloudFileUplad)({ validation: multer_1.fileFieldValidation.image }).array("attachments", 2), (0, middleware_1.validation)(validators.createPost), async (req, res, next) => {
-    const data = await post_service_1.postService.createPost({ ...req.body, files: req.files }, req.user);
-    return (0, response_1.successResponse)({ res, status: 201, data });
+router.get("/feed", (0, middleware_1.authentication)(), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.listFeed(req.user);
+        return (0, response_1.successResponse)({ res, data });
+    }
+    catch (error) {
+        return next(error);
+    }
 });
-router.patch("/:postId/react", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.reactPost), async (req, res, next) => {
-    const data = await post_service_1.postService.reactPost(req.params, req.query, req.user);
-    return (0, response_1.successResponse)({ res, status: 200, data });
+router.get("/dashboard", (0, middleware_1.authentication)(), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.dashboard(req.user);
+        return (0, response_1.successResponse)({ res, data });
+    }
+    catch (error) {
+        return next(error);
+    }
 });
-router.patch("/:postId", (0, middleware_1.authentication)(), (0, multer_1.cloudFileUplad)({ validation: multer_1.fileFieldValidation.image }).array("attachments", 2), (0, middleware_1.validation)(validators.updatePost), async (req, res, next) => {
-    const data = await post_service_1.postService.updatePost(req.params, req.body, req.user);
-    return (0, response_1.successResponse)({ res, status: 200, data });
+router.get("/profile/:id", (0, middleware_1.authentication)(), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.listUserPostsById(String(req.params.id));
+        return (0, response_1.successResponse)({ res, data });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.get("/", (0, middleware_1.authentication)(), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.listPosts();
+        return (0, response_1.successResponse)({ res, data });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.get("/mine", (0, middleware_1.authentication)(), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.listUserPosts(req.user);
+        return (0, response_1.successResponse)({ res, data });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.get("/:id", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.getPostSchema), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.getPostById(String(req.params.id));
+        return (0, response_1.successResponse)({ res, data });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.patch("/:id", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.updatePostSchema), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.updatePost(String(req.params.id), req.body, req.user);
+        return (0, response_1.successResponse)({
+            res,
+            message: "Post updated successfully",
+            data,
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.delete("/:id", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.deletePostSchema), async (req, res, next) => {
+    try {
+        await post_service_1.default.deletePost(String(req.params.id), req.user);
+        return (0, response_1.successResponse)({
+            res,
+            message: "Post deleted successfully",
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.post("/:id/like", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.likePostSchema), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.Like(String(req.params.id), req.user);
+        return (0, response_1.successResponse)({
+            res,
+            message: data.likes?.length
+                ? "Post like status updated"
+                : "Like toggled",
+            data,
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
+});
+router.post("/:id/react", (0, middleware_1.authentication)(), (0, middleware_1.validation)(validators.reactPostSchema), async (req, res, next) => {
+    try {
+        const data = await post_service_1.default.Reaction(String(req.params.id), req.body.emoji, req.user);
+        return (0, response_1.successResponse)({
+            res,
+            message: "Post reaction updated",
+            data,
+        });
+    }
+    catch (error) {
+        return next(error);
+    }
 });
 exports.default = router;

@@ -1,13 +1,13 @@
 import type { NextFunction, Response } from "express";
 import { HydratedDocument } from "mongoose";
 
-import { RoleEnum } from "../common/Enums";
+import { RoleEnum } from "../common/enums";
 import {
-  ForbiddenException,
+  ForbiddenExeption,
   MapGraphQLError,
-} from "../common/exceptions";
+} from "../common/exception";
 
-import { IUser } from "../common/interface";
+import { IUser } from "../common/interfaces";
 
 export const authorization = (
   accessRoles: RoleEnum[]
@@ -20,11 +20,11 @@ export const authorization = (
   ) => {
 
     if (!req.user) {
-      throw new ForbiddenException("Unauthorized");
+      throw new ForbiddenExeption("Unauthorized");
     }
 
     if (!accessRoles.includes(req.user.role)) {
-      throw new ForbiddenException("Not allowed account");
+      throw new ForbiddenExeption("Not allowed account");
     }
 
     next();
@@ -39,7 +39,7 @@ export const GQLAuthorization = async (
   if (!accessRoles.includes(user.role)) {
 
     throw MapGraphQLError(
-      new ForbiddenException("Not authorized account")
+      new ForbiddenExeption("Not authorized account")
     );
   }
 

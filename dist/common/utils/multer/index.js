@@ -14,5 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.validationFileFilter = void 0;
 __exportStar(require("./cloud.multer"), exports);
-__exportStar(require("./validation.multer"), exports);
+var validation_multer_1 = require("./validation.multer");
+Object.defineProperty(exports, "validationFileFilter", { enumerable: true, get: function () { return validation_multer_1.fileFilter; } });

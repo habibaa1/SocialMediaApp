@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import { generalValidation } from "../../common/validation";
+import { generalValidationFields } from "../../common/validation";
 
-import { AvailabilityEnum } from "../../common/Enums";
+import { AvailabilityEnum } from "../../common/enums";
 
 const postBaseSchema = z.strictObject({
   folderId: z.string().min(1, {
@@ -52,7 +52,7 @@ export const createPostSchema = {
 
 export const updatePostSchema = {
   params: z.strictObject({
-    id: generalValidation.id,
+    id: generalValidationFields.id,
   }),
 
   body: postUpdateBodySchema,
@@ -60,7 +60,7 @@ export const updatePostSchema = {
 
 export const getPostSchema = {
   params: z.strictObject({
-    id: generalValidation.id,
+    id: generalValidationFields.id,
   }),
 };
 
@@ -68,7 +68,7 @@ export const likePostSchema = getPostSchema;
 
 export const reactPostSchema = {
   params: z.strictObject({
-    id: generalValidation.id,
+    id: generalValidationFields.id,
   }),
 
   body: z.strictObject({
@@ -79,6 +79,6 @@ export const reactPostSchema = {
 export const deletePostSchema = getPostSchema;
 
 export const reactOnPostGQL = z.strictObject({
-  postID: generalValidation.id,
+  postID: generalValidationFields.id,
   react: z.coerce.number(),
 });

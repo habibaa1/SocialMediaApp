@@ -1,10 +1,10 @@
 import { HydratedDocument, Types } from "mongoose";
-import { INotification, IUser } from "../../common/interface";
+import { INotification, IUser } from "../../common/interfaces";
 import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from "../../common/exceptions";
+  BadRequestExaption,
+  ForbiddenExeption,
+  NotFoundExeption,
+} from "../../common/exception";
 import { NotificationRepository, UserRepository } from "../../DB/repository";
 import {
   CreateNotificationDto,
@@ -13,7 +13,7 @@ import {
 import {
   NotificationAudienceEnum,
   NotificationTypeEnum,
-} from "../../common/Enums";
+} from "../../common/enums";
 import { notificationService } from "../../common/services";
 import { redisService } from "../../common/services/redis.service";
 
@@ -34,14 +34,14 @@ export class NotificationAppService {
     user: HydratedDocument<IUser>,
   ): Promise<INotification[]> {
     if (user.role !== "ADMIN") {
-      throw new ForbiddenException("Only admin can create notifications");
+      throw new ForbiddenExeption("Only admin can create notifications");
     }
 
     const audience = data.audience ?? NotificationAudienceEnum.USER;
     const type = data.type ?? NotificationTypeEnum.SYSTEM;
 
     if (audience === NotificationAudienceEnum.USER && !data.recipientId) {
-      throw new BadRequestException(
+      throw new BadRequestExaption(
         "recipientId is required when audience is USER",
       );
     }
@@ -84,12 +84,11 @@ export class NotificationAppService {
     user: HydratedDocument<IUser>,
   ): Promise<INotification> {
     const notification = await this.notificationRepository.findOne({
-      filter: { _id: id, recipientId: user._id, deletedAt: null },
-    });
+filter: { _id: new Types.ObjectId(id), recipientId: user._id, deletedAt: null },    });
     if (!notification) {
-      throw new NotFoundException("Notification not found");
+      throw new NotFoundExeption("Notification not found");
     }
-    return notification as INotification;
+    return notification as unknown as INotification;
   }
 
   // ─── MARK AS READ ──────────────────────────────────────────────────────────
@@ -99,10 +98,9 @@ export class NotificationAppService {
     user: HydratedDocument<IUser>,
   ): Promise<INotification> {
     const notification = await this.notificationRepository.findOne({
-      filter: { _id: id, recipientId: user._id, deletedAt: null },
-    });
+filter: { _id: new Types.ObjectId(id), recipientId: user._id, deletedAt: null },    });
     if (!notification) {
-      throw new NotFoundException("Notification not found");
+      throw new NotFoundExeption("Notification not found");
     }
 
     if (notification.isRead) {
@@ -110,13 +108,13 @@ export class NotificationAppService {
     }
 
     const updated = await this.notificationRepository.updateOne({
-      filter: { _id: id },
+      filter: { _id: new Types.ObjectId(id) },
       update: { isRead: true, readAt: new Date() },
     });
     if (!updated) {
-      throw new NotFoundException("Failed to update notification");
+      throw new NotFoundExeption("Failed to update notification");
     }
-    return updated as INotification;
+    return updated as unknown as INotification;
   }
 
   // ─── MARK ALL AS READ ─────────────────────────────────────────────────────
@@ -137,18 +135,18 @@ export class NotificationAppService {
     user: HydratedDocument<IUser>,
   ): Promise<INotification> {
     if (user.role !== "ADMIN") {
-      throw new ForbiddenException("Only admin can update notifications");
+      throw new ForbiddenExeption("Only admin can update notifications");
     }
 
     const updated = await this.notificationRepository.updateOne({
-      filter: { _id: id },
+      filter: { _id: new Types.ObjectId(id) },
       update: { $set: data },
     });
     if (!updated) {
-      throw new NotFoundException("Notification not found");
+      throw new NotFoundExeption("Notification not found");
     }
-    return updated as INotification;
-  }
+// عدل السطر 149 وخليه كده بالظبط:
+return updated as unknown as INotification;  }
 
   // ─── DELETE (soft) ─────────────────────────────────────────────────────────
   async deleteNotification(
@@ -156,9 +154,9 @@ export class NotificationAppService {
     user: HydratedDocument<IUser>,
   ): Promise<void> {
     if (user.role !== "ADMIN") {
-      throw new ForbiddenException("Only admin can delete notifications");
+      throw new ForbiddenExeption("Only admin can delete notifications");
     }
-    await this.notificationRepository.deleteOne({ filter: { _id: id } });
+    await this.notificationRepository.deleteOne({ filter: { _id: new Types.ObjectId(id) } });
   }
 
   // ─── SOFT DELETE (user) ────────────────────────────────────────────────────
@@ -167,23 +165,23 @@ export class NotificationAppService {
     user: HydratedDocument<IUser>,
   ): Promise<void> {
     const notification = await this.notificationRepository.findOne({
-      filter: { _id: id, recipientId: user._id, deletedAt: null },
+      filter: { _id: new Types.ObjectId(id), recipientId: user._id, deletedAt: null },
     });
     if (!notification) {
-      throw new NotFoundException("Notification not found");
+      throw new NotFoundExeption("Notification not found");
     }
     await this.notificationRepository.updateOne({
-      filter: { _id: id },
+      filter: { _id: new Types.ObjectId(id) },
       update: { deletedAt: new Date() },
     });
   }
 
   // ─── UNREAD COUNT ──────────────────────────────────────────────────────────
   async unreadCount(user: HydratedDocument<IUser>): Promise<{ count: number }> {
-    const count = await this.notificationRepository.countDocuments({
-      filter: { recipientId: user._id, isRead: false, deletedAt: null },
-    });
-    return { count };
+const unreadNotifications = await this.notificationRepository.find({
+  filter: { recipientId: user._id, isRead: false, deletedAt: null },
+});
+return { count: unreadNotifications.length };
   }
 
   // ─── HELPERS ───────────────────────────────────────────────────────
@@ -197,7 +195,7 @@ export class NotificationAppService {
       projection: { _id: 1 },
     });
     if (!users.length) {
-      throw new NotFoundException("No users available to notify");
+      throw new NotFoundExeption("No users available to notify");
     }
 
     const docs = users.map((recipient) => ({
@@ -228,7 +226,7 @@ export class NotificationAppService {
       filter: { _id: recipientId, deletedAt: null },
     });
     if (!recipient) {
-      throw new NotFoundException("Recipient not found");
+      throw new NotFoundExeption("Recipient not found");
     }
 
     const doc = await this.notificationRepository.createOne({

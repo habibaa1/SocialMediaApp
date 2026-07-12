@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { generalValidation } from "../../common/validation";
-import { StoryTypeEnum } from "../../common/Enums";
+import { generalValidationFields } from "../../common/validation";
+import { StoryTypeEnum } from "../../common/enums";
 
 export const createStorySchema = {
   body: z.strictObject({
@@ -11,7 +11,7 @@ export const createStorySchema = {
 };
 
 export const getStorySchema = {
-  params: z.strictObject({ id: generalValidation.id }),
+  params: z.strictObject({ id: generalValidationFields.id }),
 };
 
 export const deleteStorySchema = getStorySchema;

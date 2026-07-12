@@ -11,8 +11,6 @@ const connections_db_1 = require("./DB/connections.db");
 const config_1 = require("./config/config");
 const services_1 = require("./common/services");
 const cors_1 = __importDefault(require("cors"));
-const user_reposatory_1 = require("./DB/repository/user.reposatory");
-const mongoose_1 = require("mongoose");
 const response_1 = require("./common/response");
 const node_stream_1 = require("node:stream");
 const node_util_1 = require("node:util");
@@ -27,13 +25,13 @@ const bootstrap = async () => {
     });
     app.use("/auth", modules_1.authRouter);
     app.use("/user", modules_1.userRouter);
-    app.use("/post", modules_1.PostRouter);
+    app.use("/post", modules_1.postRouter);
     app.all('/graphql', (0, express_2.createHandler)({ schema: modules_1.schema }));
     app.get("/uploads/*path", async (req, res, next) => {
         const { download, fileName } = req.query;
         const { path } = req.params;
         const Key = path.join("/");
-        const { Body, ContentType } = await services_1.s3Service.getAsset({ Key });
+        const { Body, ContentType } = await services_1.s3Service.getFile({ Key });
         console.log({ Body, ContentType });
         res.setHeader("Content-Type", ContentType || "application/octet-stream");
         res.set("Cross-Origin-Resource-Policy", "cross-origin");
@@ -46,7 +44,10 @@ const bootstrap = async () => {
         const { download, fileName } = req.query;
         const { path } = req.params;
         const Key = path.join("/");
-        const url = await services_1.s3Service.CreatePreSignedFetchLink({ Key, download, fileName });
+        const url = await services_1.s3Service.createPreSignedDownloadLink({
+            Key,
+            ...(download === "true" && { downloadName: fileName }),
+        });
         return (0, response_1.successResponse)({ res, data: { url } });
     });
     app.use(middleware_1.globalErroHandler);
@@ -56,13 +57,6 @@ const bootstrap = async () => {
     await (0, connections_db_1.connectDB)();
     await services_1.redisService.connect();
     try {
-        const userRepository = new user_reposatory_1.UserRepository();
-        const user = await userRepository.deleteOne({
-            filter: {
-                _id: mongoose_1.Types.ObjectId.createFromHexString('69fe27744b49da3e63c0c967'),
-                force: true
-            },
-        });
     }
     catch (error) {
         console.log(error);

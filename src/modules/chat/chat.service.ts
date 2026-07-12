@@ -1,11 +1,11 @@
 import { HydratedDocument, Types } from "mongoose";
 import { chatRepository, UserRepository } from "../../DB/repository";
-import { IChat, IUser } from "../../common/interface";
+import { IChat, IUser } from "../../common/interfaces";
 import {
-  BadRequestException,
-  NotFoundException,
-} from "../../common/exceptions";
-import { chatEnum } from "../../common/Enums";
+  BadRequestExaption,
+  NotFoundExeption,
+} from "../../common/exception";
+import { ChatEnum } from "../../common/enums";
 import { S3Service } from "../../common/services";
 import { randomUUID } from "node:crypto";
 
@@ -39,7 +39,7 @@ export class ChatService {
       size,
     });
     if (!chat) {
-      throw new NotFoundException("Fail to find Matching Conversation");
+      throw new NotFoundExeption("Fail to find Matching Conversation");
     }
     return chat;
   }
@@ -48,10 +48,10 @@ export class ChatService {
     { content, sendTo }: { content: string; sendTo: string },
     user: HydratedDocument<IUser>,
   ): Promise<IChat> {
-    let chat = await this.chatRepository.updateOne({
+    let chat = await this.chatRepository.findOneAndUpdate({
       filter: {
         participants: { $all: [user._id, toObjectId(sendTo)] },
-        type: chatEnum.ovo,
+        type: ChatEnum.ovo,
       },
       update: {
         $addToSet: {
@@ -78,7 +78,7 @@ export class ChatService {
               createdAt: new Date(),
             },
           ],
-          type: chatEnum.ovo,
+          type: ChatEnum.ovo,
           createdBy: user._id,
           createdAt: new Date(),
         },
@@ -93,14 +93,14 @@ export class ChatService {
     user: HydratedDocument<IUser>,
   ): Promise<IChat> {
     if (!roomId?.trim()) {
-      throw new BadRequestException("Missing roomId parameter");
+      throw new BadRequestExaption("Missing roomId parameter");
     }
 
     const chat = await this.chatRepository.findOneChat({
       filter: {
         roomId,
         participants: user._id,
-        type: chatEnum.ovm,
+        type: ChatEnum.ovm,
       },
       options: {
         populate: [{ path: "participants" }],
@@ -110,7 +110,7 @@ export class ChatService {
     });
 
     if (!chat) {
-      throw new NotFoundException("Fail to find Matching Group Conversation");
+      throw new NotFoundExeption("Fail to find Matching Group Conversation");
     }
 
     return chat;
@@ -121,18 +121,18 @@ export class ChatService {
     user: HydratedDocument<IUser>,
   ): Promise<IChat> {
     if (!roomId?.trim()) {
-      throw new BadRequestException("Missing roomId parameter");
+      throw new BadRequestExaption("Missing roomId parameter");
     }
 
     if (!content?.trim()) {
-      throw new BadRequestException("Message content is required");
+      throw new BadRequestExaption("Message content is required");
     }
 
-    const chat = await this.chatRepository.updateOne({
+    const chat = await this.chatRepository.findOneAndUpdate({
       filter: {
         roomId,
         participants: user._id,
-        type: chatEnum.ovm,
+        type: ChatEnum.ovm,
       },
       update: {
         $push: {
@@ -149,7 +149,7 @@ export class ChatService {
     });
 
     if (!chat) {
-      throw new NotFoundException("Fail to find Matching Group Conversation");
+      throw new NotFoundExeption("Fail to find Matching Group Conversation");
     }
 
     return chat;
@@ -165,20 +165,20 @@ export class ChatService {
   ): Promise<HydratedDocument<IChat>> {
     const groupName = String(group ?? "").trim();
     if (!groupName || groupName.length < 3) {
-      throw new BadRequestException(
+      throw new BadRequestExaption(
         "Group name must be at least 3 characters long",
       );
     }
 
     if (!Array.isArray(participantsIds) || participantsIds.length === 0) {
-      throw new BadRequestException("At least one participant ID is required");
+      throw new BadRequestExaption("At least one participant ID is required");
     }
 
     const normalizedParticipantIds = participantsIds
       .map((participantId) => {
         if (typeof participantId === "string") {
           if (!Types.ObjectId.isValid(participantId)) {
-            throw new BadRequestException(
+            throw new BadRequestExaption(
               `Invalid participant id: ${participantId}`,
             );
           }
@@ -192,7 +192,7 @@ export class ChatService {
           return participantId as Types.ObjectId;
         }
 
-        throw new BadRequestException(
+        throw new BadRequestExaption(
           `Invalid participant id: ${String(participantId)}`,
         );
       })
@@ -205,7 +205,7 @@ export class ChatService {
     ].map((id) => new Types.ObjectId(id));
 
     if (uniqueParticipantIds.length === 0) {
-      throw new BadRequestException(
+      throw new BadRequestExaption(
         "Group must include at least one other participant",
       );
     }
@@ -218,7 +218,7 @@ export class ChatService {
     });
 
     if (users.length !== uniqueParticipantIds.length) {
-      throw new BadRequestException(
+      throw new BadRequestExaption(
         "Some participants were not found or are not friends with the user",
       );
     }
@@ -236,7 +236,7 @@ export class ChatService {
         participants: [user._id, ...uniqueParticipantIds],
         createdBy: user._id,
         messages: [],
-        type: chatEnum.ovm,
+        type: ChatEnum.ovm,
         group: groupName,
         group_image: groupImage,
         roomId,
@@ -254,7 +254,7 @@ export class ChatService {
     user: HydratedDocument<IUser>,
   ): Promise<IChat> {
     if (!roomId) {
-      throw new BadRequestException("Missing roomId parameter");
+      throw new BadRequestExaption("Missing roomId parameter");
     }
 
     const chat = await this.chatRepository.findOneChat({
@@ -270,7 +270,7 @@ export class ChatService {
     });
 
     if (!chat) {
-      throw new NotFoundException("Fail to find Matching Group Conversation");
+      throw new NotFoundExeption("Fail to find Matching Group Conversation");
     }
 
     return chat;

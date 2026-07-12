@@ -1,8 +1,8 @@
 import { RedisClientType, createClient } from "redis";
 import { Types } from "mongoose";
 import { REDIS_URI } from "../../config/config";
-import { EmailEnum } from "../Enums";
-import { BadRequestException } from "../exceptions";
+import { EmailEnum } from "../enums";
+import { BadRequestExaption } from "../exception";
 import { sendEmail } from "../utils/email/send.email";
 import { emailTemplate } from "../utils/email/template.email";
 import { generateHash } from "../utils/security/hash.security";
@@ -67,13 +67,13 @@ export class RedisService {
     // check block
     const isBlockedTTL = await this.ttl(blockKey);
     if (isBlockedTTL > 0) {
-      throw new BadRequestException(`Try again after ${isBlockedTTL} seconds`);
+      throw new BadRequestExaption(`Try again after ${isBlockedTTL} seconds`);
     }
 
     // check existing otp
     const remainingOtpTTL = await this.ttl(otpKey);
     if (remainingOtpTTL > 0) {
-      throw new BadRequestException(
+      throw new BadRequestExaption(
         `OTP still active, try again after ${remainingOtpTTL} seconds`,
       );
     }
@@ -82,7 +82,7 @@ export class RedisService {
     const maxTrial = (await this.get<number>(attemptsKey)) || 0;
     if (maxTrial >= 3) {
       await this.set({ key: blockKey, value: 1, ttl: 7 * 60 });
-      throw new BadRequestException("Max OTP attempts reached");
+      throw new BadRequestExaption("Max OTP attempts reached");
     }
 
     const code = createRandomOtp();

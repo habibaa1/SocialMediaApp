@@ -36,7 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.userGQLSchema = exports.UserGQLSchema = void 0;
 const graphql_1 = require("graphql");
 const UserGQLTypes = __importStar(require("./user.types.gql"));
-const UserGQLArgs = __importStar(require("./eser.args.gql"));
+const UserGQLArgs = __importStar(require("./user.args.gql"));
 const user_resolver_1 = require("./user.resolver");
 class UserGQLSchema {
     userResolver;
@@ -45,30 +45,23 @@ class UserGQLSchema {
     }
     registerQuery() {
         return {
-            profile: {
-                type: UserGQLTypes.profile,
+            Profile: {
+                type: UserGQLTypes.profileType,
+                description: "test profile point",
                 args: UserGQLArgs.profile,
-                description: "test profile point 2",
-                resolve: this.userResolver.profile
+                resolve: this.userResolver.profile,
             },
-            welcome2: {
-                type: UserGQLTypes.profile,
-                description: "test profile point 2",
-                resolve: () => {
-                    return `Helloo`;
-                }
-            }
         };
     }
     registerMutation() {
         return {
             like: {
                 type: graphql_1.GraphQLString,
-                description: "test like point 2",
+                description: "test welcome point",
                 resolve: () => {
-                    return `Hello`;
-                }
-            }
+                    return "Hi there! Welcome to our API.";
+                },
+            },
         };
     }
 }

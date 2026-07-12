@@ -1,81 +1,57 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reactPost = exports.updatePost = exports.createPost = void 0;
+exports.reactOnPostGQL = exports.deletePostSchema = exports.reactPostSchema = exports.likePostSchema = exports.getPostSchema = exports.updatePostSchema = exports.createPostSchema = void 0;
 const zod_1 = require("zod");
-const enums_1 = require("../../common/enums");
-const mongoose_1 = require("mongoose");
 const validation_1 = require("../../common/validation");
-const multer_1 = require("../../common/utils/multer");
-exports.createPost = {
-    body: zod_1.z.strictObject({
-        content: zod_1.z.string().optional(),
-        files: zod_1.z.array(validation_1.generalValidationFields.file(multer_1.fileFieldValidation.image)).optional(),
-        tags: zod_1.z.array(zod_1.z.string()).optional(),
-        availability: zod_1.z.coerce.number().default(enums_1.AvailabilityEnum.PUBLIC)
-    }).superRefine((args, ctx) => {
-        if (!args.files?.length && !args.content) {
-            ctx.addIssue({
-                code: "custom",
-                path: ['content'],
-                message: "Content is required"
-            });
-        }
-        if (args.tags?.length) {
-            const uniqueTags = [...new Set(args.tags)];
-            if (uniqueTags.length !== args.tags.length) {
-                ctx.addIssue({
-                    code: "custom",
-                    path: ['tags'],
-                    message: "Duplicated tag"
-                });
-            }
-            for (const tag of args.tags) {
-                if (!mongoose_1.Types.ObjectId.isValid(tag)) {
-                    ctx.addIssue({
-                        code: "custom",
-                        path: ['tags'],
-                        message: `Invalid tagged objectId ${tag}`
-                    });
-                }
-            }
-        }
-    })
+const enums_1 = require("../../common/enums");
+const postBaseSchema = zod_1.z.strictObject({
+    folderId: zod_1.z.string().min(1, {
+        message: "folderId is required",
+    }),
+    content: zod_1.z.string().optional(),
+    attachments: zod_1.z.array(zod_1.z.string()).optional(),
+    availability: zod_1.z.nativeEnum(enums_1.AvailabilityEnum).optional(),
+});
+const postUpdateBodySchema = zod_1.z
+    .strictObject({
+    folderId: zod_1.z.string().min(1).optional(),
+    content: zod_1.z.string().optional(),
+    attachments: zod_1.z.array(zod_1.z.string()).optional(),
+    availability: zod_1.z.nativeEnum(enums_1.AvailabilityEnum).optional(),
+})
+    .refine((value) => Boolean(value.folderId) ||
+    Boolean(value.content?.trim()) ||
+    (value.attachments?.length ?? 0) > 0 ||
+    value.availability !== undefined, {
+    message: "At least one field must be provided to update",
+});
+exports.createPostSchema = {
+    body: postBaseSchema.refine((value) => Boolean(value.content?.trim()) || (value.attachments?.length ?? 0) > 0, {
+        message: "content or attachments are required",
+    }),
 };
-exports.updatePost = {
+exports.updatePostSchema = {
     params: zod_1.z.strictObject({
-        postId: validation_1.generalValidationFields.id
+        id: validation_1.generalValidationFields.id,
+    }),
+    body: postUpdateBodySchema,
+};
+exports.getPostSchema = {
+    params: zod_1.z.strictObject({
+        id: validation_1.generalValidationFields.id,
+    }),
+};
+exports.likePostSchema = exports.getPostSchema;
+exports.reactPostSchema = {
+    params: zod_1.z.strictObject({
+        id: validation_1.generalValidationFields.id,
     }),
     body: zod_1.z.strictObject({
-        content: zod_1.z.string().optional(),
-        files: zod_1.z.array(validation_1.generalValidationFields.file(multer_1.fileFieldValidation.image)).optional(),
-        removeFiles: zod_1.z.array(zod_1.z.string()).optional(),
-        removeTags: zod_1.z.array(zod_1.z.string()).optional(),
-        tags: zod_1.z.array(validation_1.generalValidationFields.id).optional(),
-        availability: zod_1.z.coerce.number().optional()
-    }).superRefine((args, ctx) => {
-        if (!Object.values(args)?.length) {
-            ctx.addIssue({
-                code: "custom",
-                message: "insert data to update the post"
-            });
-        }
-        if (args.tags?.length) {
-            const uniqueTags = [...new Set(args.tags)];
-            if (uniqueTags.length !== args.tags.length) {
-                ctx.addIssue({
-                    code: "custom",
-                    path: ['tags'],
-                    message: "Duplicated tag"
-                });
-            }
-        }
-    })
-};
-exports.reactPost = {
-    params: zod_1.z.strictObject({
-        postId: validation_1.generalValidationFields.id
+        emoji: zod_1.z.string().min(1).max(4),
     }),
-    query: zod_1.z.strictObject({
-        react: zod_1.z.coerce.number()
-    })
 };
+exports.deletePostSchema = exports.getPostSchema;
+exports.reactOnPostGQL = zod_1.z.strictObject({
+    postID: validation_1.generalValidationFields.id,
+    react: zod_1.z.coerce.number(),
+});

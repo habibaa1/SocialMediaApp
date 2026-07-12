@@ -1,171 +1,211 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.commentService = exports.CommentService = void 0;
-const services_1 = require("../../common/services");
+exports.CommentService = void 0;
+const mongoose_1 = require("mongoose");
+const exception_1 = require("../../common/exception");
 const repository_1 = require("../../DB/repository");
-const domain_exception_1 = require("../../common/exception/domain.exception");
-const post_1 = require("../../common/utils/post");
-const objectid_1 = require("../../common/utils/objectid");
+const enums_1 = require("../../common/enums");
 class CommentService {
-    redis;
-    userRepository;
-    postRepository;
-    notification;
-    s3;
     commentRepository;
+    postRepository;
+    notificationRepository;
     constructor() {
-        this.userRepository = new repository_1.UserRepository();
-        this.postRepository = new repository_1.PostRepository();
-        this.redis = services_1.redisService;
-        this.notification = services_1.notificationService;
-        this.s3 = new services_1.S3Service();
         this.commentRepository = new repository_1.CommentRepository();
+        this.postRepository = new repository_1.PostRepository();
+        this.notificationRepository = new repository_1.NotificationRepository();
     }
-    async createComment({ postId }, { content, files, tags }, user) {
+    async createComment(data, user) {
         const post = await this.postRepository.findOne({
-            filter: {
-                _id: postId,
-                $or: (0, post_1.getAvailability)(user)
-            }
+            filter: { _id: data.postId },
         });
-        if (!post) {
-            throw new domain_exception_1.NotFoundExeption("Fail to find matching post");
+        if (!post || post.deletedAt) {
+            throw new exception_1.NotFoundExeption("Post not found");
         }
-        const mentions = [];
-        const FCM_Tokens = [];
-        if (tags?.length) {
-            const mentionedAccounts = await this.userRepository.find({
-                filter: {
-                    _id: { $in: tags }
-                }
-            });
-            if (mentionedAccounts.length !== tags.length) {
-                throw new domain_exception_1.NotFoundExeption("Fail to find some or all mentioned accounts");
-            }
-            for (const tag of tags) {
-                mentions.push((0, objectid_1.toObjectId)(tag));
-                (await this.redis.getFCMs(tag) || []).map(token => FCM_Tokens.push(token));
-            }
-        }
-        const folderId = post.folderId;
-        let attachments = [];
-        if (files?.length) {
-            attachments = await this.s3.uploadAssets({
-                files: files,
-                path: `Post/${folderId}`
-            });
-        }
-        const comment = await this.commentRepository.createOne({
-            data: {
-                createdBy: user._id,
-                content: content,
-                attachments,
-                postId: post._id,
-                tags: mentions
-            }
-        });
-        if (!comment) {
-            if (attachments.length) {
-                await this.s3.deleteAssets({
-                    Keys: attachments.map(ele => {
-                        return { Key: ele };
-                    })
-                });
-            }
-            throw new domain_exception_1.BadRequestExaption("Fail");
-        }
-        if (FCM_Tokens.length) {
-            await this.notification.sendNotifications({
-                tokens: FCM_Tokens, data: {
-                    title: "Post mention",
-                    body: JSON.stringify({
-                        message: `${user.username} mentioned you in his comment`,
-                        postId: post._id,
-                        commentId: comment._id
-                    })
-                }
+        const payload = {
+            postId: new mongoose_1.Types.ObjectId(data.postId),
+            content: data.content,
+            attachments: data.attachments || [],
+            createdBy: user._id,
+            replies: [],
+        };
+        const comment = await this.commentRepository.createOne({ data: payload });
+        const recipientId = post.createdBy.toString();
+        if (recipientId !== user._id.toString()) {
+            await this.notificationRepository.createOne({
+                data: {
+                    title: "Someone commented on your post",
+                    message: data.content,
+                    senderId: user._id,
+                    recipientId: new mongoose_1.Types.ObjectId(recipientId),
+                    type: enums_1.NotificationTypeEnum.COMMENT,
+                    relatedEntityId: comment._id,
+                    relatedEntityType: "POST",
+                    isRead: false,
+                },
             });
         }
-        return comment.toJSON();
+        return comment;
     }
-    async replyOnComment({ postId, commentId }, { content, files, tags }, user) {
-        const comment = await this.commentRepository.findOne({
-            filter: {
-                _id: commentId,
-                postId: postId,
+    async replyToComment(parentCommentId, data, user) {
+        const parentComment = await this.commentRepository.findOne({
+            filter: { _id: parentCommentId },
+        });
+        if (!parentComment || parentComment.deletedAt) {
+            throw new exception_1.NotFoundExeption("Parent comment not found");
+        }
+        const replyData = {
+            createdBy: user._id,
+            content: data.content,
+            attachments: data.attachments || [],
+            reactions: [],
+        };
+        const updatedComment = await this.commentRepository.updateOne({
+            filter: { _id: parentCommentId },
+            update: {
+                $push: { replies: replyData },
             },
+        });
+        if (!updatedComment.matchedCount) {
+            throw new exception_1.NotFoundExeption("Failed to add reply");
+        }
+        const recipientId = parentComment.createdBy.toString();
+        if (recipientId !== user._id.toString()) {
+            await this.notificationRepository.createOne({
+                data: {
+                    title: "Someone replied to your comment",
+                    message: data.content,
+                    senderId: user._id,
+                    recipientId: new mongoose_1.Types.ObjectId(recipientId),
+                    type: enums_1.NotificationTypeEnum.REPLY,
+                    relatedEntityId: parentComment._id,
+                    relatedEntityType: "COMMENT",
+                    isRead: false,
+                },
+            });
+        }
+        const updatedParentComment = await this.commentRepository.findOne({
+            filter: { _id: parentCommentId },
             options: {
-                populate: [{
-                        path: "postId",
-                        match: {
-                            $or: (0, post_1.getAvailability)(user)
-                        }
-                    }]
-            }
+                populate: [
+                    { path: "createdBy", select: "firstName lastName profilePicture" },
+                    {
+                        path: "replies.createdBy",
+                        select: "firstName lastName profilePicture",
+                    },
+                ],
+            },
         });
-        if (!comment || !comment.postId) {
-            throw new domain_exception_1.NotFoundExeption("Fail to find matching comment");
+        if (!updatedParentComment) {
+            throw new exception_1.NotFoundExeption("Parent comment not found");
         }
-        const mentions = [];
-        const FCM_Tokens = [];
-        if (tags?.length) {
-            const mentionedAccounts = await this.userRepository.find({
-                filter: {
-                    _id: { $in: tags }
-                }
-            });
-            if (mentionedAccounts.length !== tags.length) {
-                throw new domain_exception_1.NotFoundExeption("Fail to find some or all mentioned accounts");
-            }
-            for (const tag of tags) {
-                mentions.push((0, objectid_1.toObjectId)(tag));
-                (await this.redis.getFCMs(tag) || []).map(token => FCM_Tokens.push(token));
-            }
-        }
-        const post = comment.postId;
-        const folderId = post.folderId;
-        let attachments = [];
-        if (files?.length) {
-            attachments = await this.s3.uploadAssets({
-                files: files,
-                path: `Post/${folderId}`
-            });
-        }
-        const reply = await this.commentRepository.createOne({
-            data: {
-                createdBy: user._id,
-                content: content,
-                attachments,
-                postId: post._id,
-                commentId: comment._id,
-                tags: mentions
-            }
+        return updatedParentComment;
+    }
+    async listPostComments(postId) {
+        return this.commentRepository.find({
+            filter: { postId, deletedAt: null },
+            options: {
+                lean: true,
+                sort: { createdAt: 1 },
+                populate: [
+                    { path: "createdBy", select: "firstName lastName profilePicture" },
+                    {
+                        path: "replies.createdBy",
+                        select: "firstName lastName profilePicture",
+                    },
+                ],
+            },
         });
-        if (!reply) {
-            if (attachments.length) {
-                await this.s3.deleteAssets({
-                    Keys: attachments.map(ele => {
-                        return { Key: ele };
-                    })
-                });
-            }
-            throw new domain_exception_1.BadRequestExaption("Fail");
+    }
+    async getCommentById(id) {
+        const comment = await this.commentRepository.findOne({
+            filter: { _id: id },
+            options: {
+                populate: [
+                    { path: "createdBy", select: "firstName lastName profilePicture" },
+                    {
+                        path: "replies.createdBy",
+                        select: "firstName lastName profilePicture",
+                    },
+                ],
+            },
+        });
+        if (!comment || comment.deletedAt) {
+            throw new exception_1.NotFoundExeption("Comment not found");
         }
-        if (FCM_Tokens.length) {
-            await this.notification.sendNotifications({
-                tokens: FCM_Tokens, data: {
-                    title: "Post mention",
-                    body: JSON.stringify({
-                        message: `${user.username} mentioned you in his comment`,
-                        postId: post._id,
-                        commentId: comment._id,
-                        replyId: reply._id
-                    })
-                }
-            });
+        return comment;
+    }
+    async updateComment(id, data, user) {
+        const comment = await this.commentRepository.findOne({
+            filter: { _id: id },
+        });
+        if (!comment || comment.deletedAt) {
+            throw new exception_1.NotFoundExeption("Comment not found");
         }
-        return reply.toJSON();
+        const ownerId = comment.createdBy.toString();
+        if (ownerId !== user._id.toString()) {
+            throw new exception_1.ForbiddenExeption("You cannot update this comment");
+        }
+        const updated = await this.commentRepository.updateOne({
+            filter: { _id: id },
+            update: {
+                $set: {
+                    ...data,
+                },
+            },
+        });
+        if (!updated.matchedCount) {
+            throw new exception_1.NotFoundExeption("Failed to update comment");
+        }
+        return this.getCommentById(id);
+    }
+    async deleteComment(id, user) {
+        const comment = await this.commentRepository.findOne({
+            filter: { _id: id },
+        });
+        if (!comment || comment.deletedAt) {
+            throw new exception_1.NotFoundExeption("Comment not found");
+        }
+        const ownerId = comment.createdBy.toString();
+        if (ownerId !== user._id.toString()) {
+            throw new exception_1.ForbiddenExeption("You cannot delete this comment");
+        }
+        const deleted = await this.commentRepository.updateOne({
+            filter: { _id: id },
+            update: { deletedAt: new Date() },
+        });
+        if (!deleted.matchedCount) {
+            throw new exception_1.NotFoundExeption("Failed to delete comment");
+        }
+        comment.deletedAt = new Date();
+        return comment;
+    }
+    async reaction(id, data, user) {
+        const comment = await this.commentRepository.findOne({
+            filter: { _id: id },
+        });
+        if (!comment || comment.deletedAt) {
+            throw new exception_1.NotFoundExeption("Comment not found");
+        }
+        const existingReactions = (comment
+            .reactions || []);
+        const emoji = data.emoji;
+        const existingIndex = existingReactions.findIndex((item) => item.emoji === emoji && item.userId.toString() === user._id.toString());
+        const reactions = [...existingReactions];
+        if (existingIndex >= 0) {
+            reactions.splice(existingIndex, 1);
+        }
+        else {
+            reactions.push({ emoji, userId: user._id });
+        }
+        const updated = await this.commentRepository.updateOne({
+            filter: { _id: id },
+            update: { reactions },
+        });
+        if (!updated.matchedCount) {
+            throw new exception_1.NotFoundExeption("Failed to update reaction");
+        }
+        return this.getCommentById(id);
     }
 }
 exports.CommentService = CommentService;
-exports.commentService = new CommentService();
+exports.default = new CommentService();

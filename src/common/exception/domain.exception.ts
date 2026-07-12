@@ -1,43 +1,51 @@
+    import { GraphQLError } from "graphql";
 import { ApplicationExaption } from "./application.exception"
 
-export class BadRequestExaption extends ApplicationExaption {
+    export class BadRequestExaption extends ApplicationExaption {
 
-    constructor(message:string="BadRequest " , cause?: unknown){
-        super(message ,400, cause)
+        constructor(message:string="BadRequest " , cause?: unknown){
+            super(message ,400, cause)
 
+        }
     }
-}
+    export const MapGraphQLError = (error: ApplicationExaption) => {
+    throw new GraphQLError(error.message || "internal server error", {
+        extensions: {
+        statusCode: error.statusCode,
+        },
+    });
+    };
 
-export class ConflictExeption extends ApplicationExaption {
+    export class ConflictExeption extends ApplicationExaption {
 
-    constructor(message:string='conflict' , cause?: unknown){
-        super(message ,409, cause)
+        constructor(message:string='conflict' , cause?: unknown){
+            super(message ,409, cause)
 
+        }
     }
-}
 
 
-export class NotFoundExeption extends ApplicationExaption {
+    export class NotFoundExeption extends ApplicationExaption {
 
-    constructor(message:string='NotFound' , cause?: unknown){
-        super(message ,404, cause)
+        constructor(message:string='NotFound' , cause?: unknown){
+            super(message ,404, cause)
 
+        }
     }
-}
 
 
-export class UnauthorizedExeption extends ApplicationExaption {
+    export class UnauthorizedExeption extends ApplicationExaption {
 
-    constructor(message:string='Unauthorize' , cause?: unknown){
-        super(message ,401, cause)
+        constructor(message:string='Unauthorize' , cause?: unknown){
+            super(message ,401, cause)
 
+        }
     }
-}
 
-export class ForbiddenExeption extends ApplicationExaption {
+    export class ForbiddenExeption extends ApplicationExaption {
 
-    constructor(message:string='Forbidden' , cause?: unknown){
-        super(message ,403, cause)
+        constructor(message:string='Forbidden' , cause?: unknown){
+            super(message ,403, cause)
 
+        }
     }
-}
